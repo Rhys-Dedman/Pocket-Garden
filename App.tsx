@@ -1434,9 +1434,24 @@ export default function App() {
                 </button>
               </div>
 
+              {/* Customer Area - sits between header and hex grid */}
+              <div 
+                className="relative w-full z-20 flex-shrink-0"
+                style={{
+                  height: '100px',
+                  border: '2px dashed #000',
+                  backgroundColor: 'transparent',
+                }}
+              >
+                {/* Customer content will go here */}
+              </div>
+
               <div 
                 ref={hexAreaRef}
                 className="relative flex-grow flex flex-col items-center justify-center overflow-visible z-10"
+                style={{
+                  border: '2px dashed #0066ff',
+                }}
               >
                 {/* Only tapping this backdrop (background) closes the panel; hex cells and plants do not */}
                 <div
@@ -1484,7 +1499,7 @@ export default function App() {
                 </div>
 
                 {/* Reduced height from 340px to 323px (5% smaller); pointer-events-none so taps on background close upgrade panel */}
-                <div className="relative w-full flex items-center justify-center h-[323px] overflow-visible mb-12 pointer-events-none">
+                <div className="relative w-full flex items-center justify-center h-[323px] overflow-visible pointer-events-none" style={{ marginBottom: '35px' }}>
                   <HexBoard
                     isActive={activeTab === 'CROPS' && isExpanded}
                     grid={grid}
@@ -1586,7 +1601,7 @@ export default function App() {
                 onClick={(e) => e.stopPropagation()}
                 className="flex flex-col overflow-hidden relative z-30 shadow-[0_-15px_50px_rgba(0,0,0,0.15)] rounded-t-[32px] transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"
                 style={{
-                  height: isExpanded ? 'calc(45vh - 55px)' : '50px',
+                  height: isExpanded ? 'calc(30vh - 55px)' : '50px',
                   background: '#fcf0c6',
                   borderTop: '1px solid #ebdbaf'
                 }}
