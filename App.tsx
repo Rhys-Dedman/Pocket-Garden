@@ -1406,32 +1406,30 @@ export default function App() {
                   walletRef={walletRef}
                   walletIconRef={walletIconRef}
                   walletFlashActive={walletFlashActive}
+                  walletBurstCount={walletBursts.length}
                   onWalletClick={() => setActiveScreen('STORE')}
                 />
-                {/* Limited Offer test button - positioned absolutely */}
-                <button
-                  onClick={() => setLimitedOfferPopup({
-                    isVisible: true,
-                    offerId: 'super_seed_offer',
-                    imageSrc: assetPath('/assets/plants/plant_2.png'),
-                    subtitle: 'SUPER SEED',
-                    description: 'Spawn 10 seeds instantly onto the board',
-                    buttonText: 'Accept Offer',
-                  })}
-                  className="absolute flex items-center justify-center transition-all active:scale-95"
-                  style={{
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '8px',
-                    background: 'linear-gradient(180deg, #FFB347 0%, #FF9500 100%)',
-                    border: '2px solid #E88A00',
-                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
-                    top: '16px',
-                    left: '85px',
-                  }}
-                >
-                  <span style={{ fontSize: '18px' }}>🎁</span>
-                </button>
+                {/* Limited Offer / Gift button - centered in top UI */}
+                <div className="absolute left-1/2 -translate-x-1/2 top-4 flex items-center justify-center">
+                  <button
+                    onClick={() => setLimitedOfferPopup({
+                      isVisible: true,
+                      offerId: 'super_seed_offer',
+                      imageSrc: assetPath('/assets/plants/plant_2.png'),
+                      subtitle: 'SUPER SEED',
+                      description: 'Spawn 10 seeds instantly onto the board',
+                      buttonText: 'Accept Offer',
+                    })}
+                    className="flex items-center justify-center transition-all active:scale-95 w-9 h-9 rounded-lg"
+                    style={{
+                      background: 'linear-gradient(180deg, #FFB347 0%, #FF9500 100%)',
+                      border: '2px solid #E88A00',
+                      boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
+                    }}
+                  >
+                    <span style={{ fontSize: '18px' }}>🎁</span>
+                  </button>
+                </div>
               </div>
 
               {/* Customer Area - sits between header and hex grid */}
@@ -2015,7 +2013,7 @@ export default function App() {
                 setWalletFlashActive(true);
                 setWalletBursts((prev) => [...prev, { id: nextWalletBurstIdRef.current++, trigger: Date.now() }]);
                 if (walletFlashTimeoutRef.current) clearTimeout(walletFlashTimeoutRef.current);
-                walletFlashTimeoutRef.current = setTimeout(() => setWalletFlashActive(false), 75);
+                walletFlashTimeoutRef.current = setTimeout(() => setWalletFlashActive(false), 120);
               }}
               onComplete={() => setActiveCoinPanels(prev => prev.filter((c) => c.id !== coin.id))}
             />
