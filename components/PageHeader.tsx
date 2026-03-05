@@ -106,7 +106,7 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
             <button
               ref={walletRef}
               onClick={onWalletClick}
-              className="relative flex items-center w-[60px] h-[22px] rounded-full border outline-none shadow-2xl hover:opacity-90 active:scale-95 transition-all overflow-visible"
+              className="relative inline-flex items-center h-[22px] rounded-full border outline-none shadow-2xl hover:opacity-90 active:scale-95 transition-all overflow-visible w-fit min-w-0"
               style={{
                 backgroundColor: '#775041',
                 borderWidth: 1,
@@ -121,16 +121,16 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
                 }}
                 aria-hidden
               />
+              {/* Icon: fixed left, does not affect width */}
               <span
                 ref={walletIconRef}
-                className="relative flex items-center justify-center leading-none flex-shrink-0 -ml-3"
+                className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center justify-center leading-none -ml-3 pointer-events-none"
                 aria-hidden
               >
                 <img key={bounceKey} src={assetPath('/assets/icons/icon_coin.png')} alt="" className={`w-[30px] h-[30px] object-contain object-left outline-none border-0 ${bounceKey > 0 ? 'coin-bounce' : ''}`} style={{ outline: 'none', border: 'none' }} />
               </span>
-              <span
-                className="relative font-black text-xs tracking-tight text-[#fcf0c7] overflow-hidden truncate flex-1 min-w-0 -ml-[6px]"
-              >
+              {/* Text drives bg width; layout ignores icon */}
+              <span className="relative font-black text-xs tracking-tight text-[#fcf0c7] whitespace-nowrap pl-[20px] pr-3 py-1">
                 {formatMoney(money)}
               </span>
             </button>
@@ -152,7 +152,7 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
           </>
         ) : plantWallet ? (
           <div
-            className="relative flex items-center w-[60px] h-[22px] rounded-full border shadow-2xl overflow-visible"
+            className="relative inline-flex items-center h-[22px] rounded-full border shadow-2xl overflow-visible w-fit min-w-0"
             style={{
               backgroundColor: '#775041',
               borderWidth: 1,
@@ -160,18 +160,18 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
             }}
           >
             <span
-              className="relative flex items-center justify-center text-sm leading-none flex-shrink-0"
+              className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center justify-center text-sm leading-none -ml-3 pointer-events-none"
               aria-hidden
             >
               🌱
             </span>
-            <span className="relative font-black text-xs tracking-tight text-[#fcf0c7] overflow-hidden truncate flex-1 min-w-0 -ml-[6px]">
+            <span className="relative font-black text-xs tracking-tight text-[#fcf0c7] whitespace-nowrap pl-[20px] pr-3 py-1">
               {plantWallet.unlockedCount} / {plantWallet.totalCount}
             </span>
           </div>
         ) : (
           <div
-            className="relative flex items-center w-[60px] h-[22px] rounded-full border shadow-2xl overflow-visible"
+            className="relative inline-flex items-center h-[22px] rounded-full border shadow-2xl overflow-visible w-fit min-w-0"
             style={{
               backgroundColor: '#775041',
               borderWidth: 1,
@@ -187,12 +187,12 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
               aria-hidden
             />
             <span
-              className="relative flex items-center justify-center leading-none flex-shrink-0 -ml-3"
+              className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center justify-center leading-none -ml-3 pointer-events-none"
               aria-hidden
             >
               <img key={bounceKey} src={assetPath('/assets/icons/icon_coin.png')} alt="" className={`w-[30px] h-[30px] object-contain object-left outline-none border-0 ${bounceKey > 0 ? 'coin-bounce' : ''}`} style={{ outline: 'none', border: 'none' }} />
             </span>
-            <span className="relative font-black text-xs tracking-tight text-[#fcf0c7] overflow-hidden truncate flex-1 min-w-0 -ml-[6px]">
+            <span className="relative font-black text-xs tracking-tight text-[#fcf0c7] whitespace-nowrap pl-[20px] pr-3 py-1">
               {formatMoney(money)}
             </span>
           </div>

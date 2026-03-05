@@ -7,6 +7,7 @@ import { PLANT_CONTAINER_WIDTH, PLANT_CONTAINER_HEIGHT } from '../constants/boar
 import { assetPath } from '../utils/assetPath';
 
 const LEAF_SPRITES = [assetPath('/assets/vfx/particle_leaf_1.png'), assetPath('/assets/vfx/particle_leaf_2.png')];
+const LEAF_SPRITES_GOLD = [assetPath('/assets/vfx/particle_leaf_3.png'), assetPath('/assets/vfx/particle_leaf_4.png')];
 const CELL_SCALE = 1.2;
 const HEX_RADIUS_PX = 0.6 * PLANT_CONTAINER_WIDTH * CELL_SCALE;
 const MAX_RADIUS_HEX = 1;
@@ -43,12 +44,16 @@ interface LeafBurstProps {
   useCircle?: boolean;
   /** App scale factor for scaling particle sizes (default: 1) */
   appScale?: number;
+  /** Use leaf 3 & 4 sprites instead of 1 & 2 (e.g. for goal coin collect) */
+  spriteVariant?: 'default' | 'gold';
+  /** Scale multiplier for burst size (default: 1) */
+  burstScale?: number;
 }
 
-function createLeaves(count: number): LeafParticle[] {
+function createLeaves(count: number, sprites: string[] = LEAF_SPRITES): LeafParticle[] {
   return Array.from({ length: count }, (_, i) => ({
     id: i,
-    sprite: LEAF_SPRITES[i % LEAF_SPRITES.length],
+    sprite: sprites[i % sprites.length],
     angle: (Math.PI * 2 * i) / count + Math.random() * 0.8,
     initialSpeed: 25 + Math.random() * 475,
     initialRotationRad: Math.random() * Math.PI * 2,
@@ -59,8 +64,9 @@ function createLeaves(count: number): LeafParticle[] {
   }));
 }
 
-export const LeafBurst: React.FC<LeafBurstProps> = ({ x, y, startTime, onComplete, particleCount = LEAF_BURST_BASELINE_COUNT, useCircle = false, appScale = 1 }) => {
-  const [leaves] = useState<LeafParticle[]>(() => createLeaves(particleCount));
+export const LeafBurst: React.FC<LeafBurstProps> = ({ x, y, startTime, onComplete, particleCount = LEAF_BURST_BASELINE_COUNT, useCircle = false, appScale = 1, spriteVariant = 'default', burstScale = 1 }) => {
+  const sprites = spriteVariant === 'gold' ? LEAF_SPRITES_GOLD : LEAF_SPRITES;
+  const [leaves] = useState<LeafParticle[]>(() => createLeaves(particleCount, sprites));
   const [positions, setPositions] = useState<{ x: number; y: number; opacity: number; rotation: number; scale: number }[]>(
     () => leaves.map(() => ({ x: 0, y: 0, opacity: 1, rotation: 0, scale: 1 }))
   );
@@ -168,7 +174,7 @@ export const LeafBurst: React.FC<LeafBurstProps> = ({ x, y, startTime, onComplet
         top: y - SPAWN_OFFSET_UP_PX * appScale,
         width: 1,
         height: 1,
-        transform: `translate(-50%, -50%) scale(${appScale})`,
+        transform: `translate(-50%, -50%) scale(${appScale * burstScale})`,
         transformOrigin: 'center center',
         zIndex: 70,
       }}

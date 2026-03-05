@@ -706,7 +706,7 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
     const upgrades = getUpgradesForTab(category);
     const categoryOffers = rewardedOffers.filter(o => o.tab === category);
     return (
-    <div ref={(scrollRefs as any)[category]} className="flex-grow overflow-y-auto no-scrollbar px-3 pt-3 pb-3 h-full space-y-2.5 overscroll-contain cursor-grab active:cursor-grabbing select-none">
+    <div ref={(scrollRefs as any)[category]} className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-3 pt-3 space-y-2.5 overscroll-contain cursor-grab active:cursor-grabbing select-none" style={{ paddingBottom: 75 }}>
       {/* Rewarded offers at top */}
       {categoryOffers.map(offer => renderRewardedOfferItem(offer))}
       {upgrades.map((upgrade) => {
@@ -860,11 +860,11 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
   const getTabIndex = () => TABS.indexOf(activeTab);
   const translateX = `calc(-${getTabIndex() * (100 / 3)}% + ${dragOffset}px)`;
   return (
-    <div className="h-full relative overflow-hidden">
-      <div className={`tab-content-container h-full ${isHorizontalDragging ? 'transition-none' : 'transition-transform duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]'}`} style={{ transform: `translateX(${translateX})` }}>
-        <div className="tab-pane h-full">{renderUpgradeItems('SEEDS', seedsState)}</div>
-        <div className="tab-pane h-full">{renderUpgradeItems('CROPS', cropsState)}</div>
-        <div className="tab-pane h-full">{renderUpgradeItems('HARVEST', harvestState)}</div>
+    <div className="flex-1 min-h-0 relative overflow-hidden flex flex-col">
+      <div className={`tab-content-container h-full min-h-0 flex flex-1 ${isHorizontalDragging ? 'transition-none' : 'transition-transform duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]'}`} style={{ transform: `translateX(${translateX})` }}>
+        <div className="tab-pane h-full min-h-0 flex flex-col">{renderUpgradeItems('SEEDS', seedsState)}</div>
+        <div className="tab-pane h-full min-h-0 flex flex-col">{renderUpgradeItems('CROPS', cropsState)}</div>
+        <div className="tab-pane h-full min-h-0 flex flex-col">{renderUpgradeItems('HARVEST', harvestState)}</div>
       </div>
     </div>
   );

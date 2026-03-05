@@ -8,10 +8,12 @@ import { Navbar } from './components/Navbar';
 import { StoreScreen } from './components/StoreScreen';
 import { SideAction } from './components/SideAction';
 import { Projectile } from './components/Projectile';
-import { LeafBurst, LEAF_BURST_SMALL_COUNT } from './components/LeafBurst';
+import { LeafBurst, LEAF_BURST_BASELINE_COUNT, LEAF_BURST_SMALL_COUNT } from './components/LeafBurst';
 import { UnlockBurst } from './components/UnlockBurst';
 import { CellHighlightBeam } from './components/CellHighlightBeam';
 import { CoinPanel, CoinPanelData } from './components/CoinPanel';
+import { PlantPanel, PlantPanelData } from './components/PlantPanel';
+import { GoalCoinParticle, GoalCoinParticleData } from './components/GoalCoinParticle';
 import { WalletImpactBurst } from './components/WalletImpactBurst';
 import { PageHeader } from './components/PageHeader';
 import { DiscoveryPopup } from './components/DiscoveryPopup';
@@ -44,6 +46,15 @@ POPUP_ASSETS_TO_PRELOAD.forEach((src) => {
   const img = new Image();
   img.src = src;
 });
+
+/** Goal icons: 1 per slot (seed production, seed surplus, merge harvest, harvest boost, crop synergy) */
+const GOAL_ICONS = [
+  assetPath('/assets/icons/icon_seedproduction.png'),
+  assetPath('/assets/icons/icon_seedsurplus.png'),
+  assetPath('/assets/icons/icon_mergeharvest.png'),
+  assetPath('/assets/icons/icon_harvestboost.png'),
+  assetPath('/assets/icons/icon_cropsynergy.png'),
+];
 
 /** Plant names and descriptions for discovery popups */
 const PLANT_DATA: Record<number, { name: string; description: string }> = {
@@ -146,13 +157,27 @@ export default function App() {
   // Barn notification state - shows when a new plant is added to barn
   const [barnNotification, setBarnNotification] = useState(false);
   const [unlockingCellIndices, setUnlockingCellIndices] = useState<number[]>([]); // Cells currently playing unlock animation
-  // Goals: slot 1-5, each is 'empty' | 'loading' | 'green'. Only 1 loading at a time.
-  const [goalSlots, setGoalSlots] = useState<('empty' | 'loading' | 'green')[]>(['loading', 'empty', 'empty', 'empty', 'empty']);
+  // Goals: slot 1-5, each is 'empty' | 'loading' | 'green' | 'completed'. Only 1 loading at a time.
+  const [goalSlots, setGoalSlots] = useState<('empty' | 'loading' | 'green' | 'completed')[]>(['loading', 'empty', 'empty', 'empty', 'empty']);
   const [goalLoadingSeconds, setGoalLoadingSeconds] = useState(5); // countdown 5->0
-  const [goalBounceSlot, setGoalBounceSlot] = useState<number | null>(null); // slot index bouncing
   const [goalTransitionSlot, setGoalTransitionSlot] = useState<number | null>(null); // slot transitioning loading->green (for fade)
   const [goalTransitionFade, setGoalTransitionFade] = useState(false); // triggers fade: loading out, green in
   const [goalSlotFadeInSlot, setGoalSlotFadeInSlot] = useState<number | null>(null); // slot fading in 0→100% over 500ms; countdown waits until done
+  const [goalCounts, setGoalCounts] = useState<number[]>([0, 0, 0, 0, 0]); // remaining count per slot when green (e.g. 5→4→3)
+  const [goalCompletedValues, setGoalCompletedValues] = useState<number[]>([0, 0, 0, 0, 0]); // coin value when completed (plantValue × 5 × 2)
+  const [goalImpactSlots, setGoalImpactSlots] = useState<number[]>([]); // slots currently playing impact (white flash + icon scale)
+  const [goalBounceSlots, setGoalBounceSlots] = useState<number[]>([]); // slots currently bouncing (panel down)
+  const [goalSlidingUpSlots, setGoalSlidingUpSlots] = useState<Set<number>>(new Set()); // slots currently playing slide-up animation
+  const [goalCompactionStagger, setGoalCompactionStagger] = useState<{ completedSlotIdx: number; completedPosition: number; oldDisplayIndices: number[]; isOverlapping?: boolean } | null>(null);
+  const [goalDisplayOrder, setGoalDisplayOrder] = useState<number[]>([0]); // Fixed left-to-right order; never reshuffle by plant type
+  const [activeGoalCoinParticles, setActiveGoalCoinParticles] = useState<GoalCoinParticleData[]>([]);
+  const goalIconRef0 = useRef<HTMLImageElement>(null);
+  const goalIconRef1 = useRef<HTMLImageElement>(null);
+  const goalIconRef2 = useRef<HTMLImageElement>(null);
+  const goalIconRef3 = useRef<HTMLImageElement>(null);
+  const goalIconRef4 = useRef<HTMLImageElement>(null);
+  const goalIconRefs = [goalIconRef0, goalIconRef1, goalIconRef2, goalIconRef3, goalIconRef4];
+  const [activePlantPanels, setActivePlantPanels] = useState<PlantPanelData[]>([]);
   const [fertilizingCellIndices, setFertilizingCellIndices] = useState<number[]>([]); // Cells currently playing fertilize animation
 
   // Calculate locked cell count from grid
@@ -176,12 +201,14 @@ export default function App() {
   const [leafBurstsSmall, setLeafBurstsSmall] = useState<{ id: string; x: number; y: number; startTime: number; particleCount?: number; useCircle?: boolean }[]>([]);
   const [unlockBursts, setUnlockBursts] = useState<{ id: string; x: number; y: number; startTime: number }[]>([]);
   const [buttonLeafBursts, setButtonLeafBursts] = useState<{ id: string; x: number; y: number; startTime: number }[]>([]);
+  const [goalCoinLeafBursts, setGoalCoinLeafBursts] = useState<{ id: string; x: number; y: number; startTime: number }[]>([]);
   const [cellHighlightBeams, setCellHighlightBeams] = useState<{ id: string; x: number; y: number; cellWidth: number; cellHeight: number; startTime: number }[]>([]);
   const [activeCoinPanels, setActiveCoinPanels] = useState<CoinPanelData[]>([]);
   const [harvestBounceCellIndices, setHarvestBounceCellIndices] = useState<number[]>([]);
   const [walletFlashActive, setWalletFlashActive] = useState(false);
   const [walletBursts, setWalletBursts] = useState<{ id: number; trigger: number }[]>([]);
   const nextWalletBurstIdRef = useRef(0);
+  const nextGoalCoinBurstIdRef = useRef(0);
   const walletFlashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingMergeLevelIncreaseRef = useRef<number>(1);
   const plantButtonRef = useRef<HTMLDivElement>(null);
@@ -520,31 +547,33 @@ export default function App() {
             clearInterval(goalIntervalRef.current);
             goalIntervalRef.current = null;
           }
-          setGoalBounceSlot(loadingIdx);
+          setGoalBounceSlots((prev) => prev.includes(loadingIdx) ? prev : [...prev, loadingIdx]);
           setGoalTransitionSlot(loadingIdx);
           setGoalTransitionFade(false);
+          setGoalCounts((c) => {
+            const next = [...c];
+            next[loadingIdx] = 5;
+            return next;
+          });
           requestAnimationFrame(() => requestAnimationFrame(() => setGoalTransitionFade(true)));
-          const nextSlot = loadingIdx + 1;
-          // After bounce 100% complete (500ms): set slot green, then initiate next slot
+          // After bounce 100% complete (500ms): set slot green, then initiate next slot (first empty, at far right)
           setTimeout(() => {
-            setGoalBounceSlot(null);
+            const firstEmptyIdx = goalSlots.findIndex((s) => s === 'empty');
+            setGoalBounceSlots((prev) => prev.filter((s) => s !== loadingIdx));
             setGoalSlots((slots) => {
               const next = [...slots];
               next[loadingIdx] = 'green';
-              if (nextSlot < 5) next[nextSlot] = 'loading';
+              if (firstEmptyIdx >= 0) next[firstEmptyIdx] = 'loading';
               return next;
             });
+            if (firstEmptyIdx >= 0) {
+              setGoalDisplayOrder((prev) => (prev.includes(firstEmptyIdx) ? prev : [...prev, firstEmptyIdx]));
+              setGoalSlotFadeInSlot(firstEmptyIdx);
+              setGoalLoadingSeconds(5);
+              setTimeout(() => setGoalSlotFadeInSlot(null), 500);
+            }
             setGoalTransitionSlot(null);
             setGoalTransitionFade(false);
-            // Initiate next slot only after bounce is done: loading at 0% opacity, fades in over 500ms
-            if (nextSlot < 5) {
-              setGoalSlotFadeInSlot(nextSlot);
-              setGoalLoadingSeconds(5); // show 5s during fade-in (countdown hasn't started yet)
-              setTimeout(() => {
-                setGoalSlotFadeInSlot(null);
-                setGoalLoadingSeconds(5); // ensure 5 when fade-in done, so countdown starts at 5
-              }, 500); // after fade-in, countdown starts
-            }
           }, 500); // bounce duration 500ms
           return 0;
         }
@@ -995,6 +1024,7 @@ export default function App() {
   };
 
   // Perform a single harvest (used for both normal and lucky double harvest)
+  // Plant harvest: if goal exists for plant level (1-5 → slot 0-4), spawn plant panel to goal. Else spawn coin panel.
   const performHarvest = useCallback((delayMs: number = 0, idSuffix: string = '') => {
     const container = containerRef.current;
     const wallet = walletRef.current;
@@ -1009,35 +1039,30 @@ export default function App() {
       const walletCenterX = (walletRect.left + walletRect.width / 2 - containerRect.left) / scale;
       const walletCenterY = (walletRect.top + walletRect.height / 2 - containerRect.top) / scale;
 
-      const panelsWithDist: { panel: CoinPanelData; dist: number }[] = [];
+      const coinPanelsWithDist: { panel: CoinPanelData; dist: number }[] = [];
+      const plantPanelsWithDist: { panel: PlantPanelData; dist: number }[] = [];
 
       const cropValueMultiplier = getCropValueMultiplier(harvestState);
       const cropSynergyMultiplier = getCropSynergyMultiplier(harvestState);
-      
       const synergyCellIndices: number[] = [];
-      
+
+      const getGoalIconCenter = (slotIdx: number): { x: number; y: number } | null => {
+        const iconEl = goalIconRefs[slotIdx]?.current;
+        if (!iconEl) return null;
+        const r = iconEl.getBoundingClientRect();
+        return {
+          x: (r.left + r.width / 2 - containerRect.left) / scale,
+          y: (r.top + r.height / 2 - containerRect.top) / scale,
+        };
+      };
+
       grid.forEach((cell, cellIdx) => {
         if (!cell.item) return;
         harvestCellIndices.push(cellIdx);
-        const baseValue = getCoinValueForLevel(cell.item.level);
-        
-        // Apply crop value multiplier
-        let value = baseValue * cropValueMultiplier;
-        
-        // Apply crop synergy multiplier if this cell has adjacent same-level plants
-        const hasSynergy = cropSynergyMultiplier > 1.0 && hasAdjacentSameLevel(cellIdx, grid);
-        if (hasSynergy) {
-          value *= cropSynergyMultiplier;
-          synergyCellIndices.push(cellIdx);
-        }
-        
-        // Apply 2x multiplier for fertile cells
-        if (cell.fertile) {
-          value *= 2;
-        }
-        
-        value = Math.floor(value);
-        
+        const level = cell.item.level;
+        const slotIdx = level >= 1 && level <= 5 ? level - 1 : -1;
+        const hasGoalForPlant = slotIdx >= 0 && goalSlots[slotIdx] === 'green' && goalCounts[slotIdx] > 0;
+
         const hexEl = document.getElementById(`hex-${cellIdx}`);
         if (!hexEl) return;
         const hexRect = hexEl.getBoundingClientRect();
@@ -1048,19 +1073,47 @@ export default function App() {
         const panelHeightPx = 14;
         const offsetUp = (panelHeightPx / 2 + 4) * 0.8;
         const hoverY = hexTopY - offsetUp;
-        const dist = Math.hypot(hoverX - walletCenterX, hoverY - walletCenterY);
-        panelsWithDist.push({
-          dist,
-          panel: {
-            id: `coin-${cellIdx}-${Date.now()}-${Math.random().toString(36).slice(2)}${idSuffix}`,
-            value,
-            startX,
-            startY,
-            hoverX,
-            hoverY,
-            moveToWalletDelayMs: delayMs,
-          },
-        });
+
+        if (hasGoalForPlant) {
+          const goalCenter = getGoalIconCenter(slotIdx);
+          const dist = goalCenter ? Math.hypot(hoverX - goalCenter.x, hoverY - goalCenter.y) : 0;
+          plantPanelsWithDist.push({
+            dist,
+            panel: {
+              id: `plant-${cellIdx}-${Date.now()}-${Math.random().toString(36).slice(2)}${idSuffix}`,
+              goalSlotIdx: slotIdx,
+              iconSrc: GOAL_ICONS[slotIdx],
+              startX,
+              startY,
+              hoverX,
+              hoverY,
+              moveToTargetDelayMs: delayMs,
+            },
+          });
+        } else {
+          const baseValue = getCoinValueForLevel(level);
+          let value = baseValue * cropValueMultiplier;
+          const hasSynergy = cropSynergyMultiplier > 1.0 && hasAdjacentSameLevel(cellIdx, grid);
+          if (hasSynergy) {
+            value *= cropSynergyMultiplier;
+            synergyCellIndices.push(cellIdx);
+          }
+          if (cell.fertile) value *= 2;
+          value = Math.floor(value);
+          const dist = Math.hypot(hoverX - walletCenterX, hoverY - walletCenterY);
+          coinPanelsWithDist.push({
+            dist,
+            panel: {
+              id: `coin-${cellIdx}-${Date.now()}-${Math.random().toString(36).slice(2)}${idSuffix}`,
+              value,
+              startX,
+              startY,
+              hoverX,
+              hoverY,
+              moveToWalletDelayMs: delayMs,
+            },
+          });
+        }
       });
 
       setTimeout(() => {
@@ -1082,8 +1135,7 @@ export default function App() {
             ]);
           }
         });
-        
-        // Spawn highlight VFX for cells with crop synergy bonus
+
         synergyCellIndices.forEach((cellIdx) => {
           const hexEl = document.getElementById(`hex-${cellIdx}`);
           if (hexEl) {
@@ -1102,23 +1154,36 @@ export default function App() {
           }
         });
 
-        if (panelsWithDist.length > 0) {
-          const N = panelsWithDist.length;
-          const minDist = Math.min(...panelsWithDist.map((x) => x.dist));
-          const maxDist = Math.max(...panelsWithDist.map((x) => x.dist));
+        if (coinPanelsWithDist.length > 0) {
+          const N = coinPanelsWithDist.length;
+          const minDist = Math.min(...coinPanelsWithDist.map((x) => x.dist));
+          const maxDist = Math.max(...coinPanelsWithDist.map((x) => x.dist));
           const range = maxDist - minDist || 1;
           const maxStaggerMs = N <= 1 ? 0 : Math.min(300, 300 * (N - 1) / 4);
-          const panels: CoinPanelData[] = panelsWithDist.map(({ panel, dist }) => ({
+          const panels: CoinPanelData[] = coinPanelsWithDist.map(({ panel, dist }) => ({
             ...panel,
             moveToWalletDelayMs: panel.moveToWalletDelayMs + ((dist - minDist) / range) * maxStaggerMs,
           }));
           setActiveCoinPanels(prev => [...prev, ...panels]);
         }
+
+        if (plantPanelsWithDist.length > 0) {
+          const N = plantPanelsWithDist.length;
+          const minDist = Math.min(...plantPanelsWithDist.map((x) => x.dist));
+          const maxDist = Math.max(...plantPanelsWithDist.map((x) => x.dist));
+          const range = maxDist - minDist || 1;
+          const maxStaggerMs = N <= 1 ? 0 : Math.min(300, 300 * (N - 1) / 4);
+          const panels: PlantPanelData[] = plantPanelsWithDist.map(({ panel, dist }) => ({
+            ...panel,
+            moveToTargetDelayMs: panel.moveToTargetDelayMs + ((dist - minDist) / range) * maxStaggerMs,
+          }));
+          setActivePlantPanels(prev => [...prev, ...panels]);
+        }
       }, delayMs);
     }
-  }, [grid, harvestState]);
+  }, [grid, harvestState, goalSlots, goalCounts]);
 
-  // Perform merge harvest: roll chance per adjacent cell to harvest (spawn coin) without removing plant
+  // Perform merge harvest: roll chance per adjacent cell to harvest (spawn coin or plant panel) without removing plant
   const performMergeHarvest = useCallback((centerCellIdx: number, chancePercent: number, excludeCellIdx?: number) => {
     const container = containerRef.current;
     const wallet = walletRef.current;
@@ -1128,14 +1193,10 @@ export default function App() {
     if (!container || !walletEl) return;
 
     const adjacentIndices = getAdjacentCellIndices(centerCellIdx, grid);
-    // Exclude the source cell (now empty after merge) from adjacent cells
     const adjacentWithCrops = adjacentIndices.filter(idx => idx !== excludeCellIdx && grid[idx]?.item != null);
-    
     if (adjacentWithCrops.length === 0) return;
 
-    // Roll chance independently for each adjacent cell
     const triggeredCells = adjacentWithCrops.filter(() => Math.random() * 100 < chancePercent);
-    
     if (triggeredCells.length === 0) return;
 
     const scale = appScaleRef.current;
@@ -1144,30 +1205,32 @@ export default function App() {
     const walletCenterX = (walletRect.left + walletRect.width / 2 - containerRect.left) / scale;
     const walletCenterY = (walletRect.top + walletRect.height / 2 - containerRect.top) / scale;
 
-    const panelsWithDist: { panel: CoinPanelData; dist: number }[] = [];
+    const coinPanelsWithDist: { panel: CoinPanelData; dist: number }[] = [];
+    const plantPanelsWithDist: { panel: PlantPanelData; dist: number }[] = [];
     const cropValueMultiplier = getCropValueMultiplier(harvestState);
     const cropSynergyMultiplier = getCropSynergyMultiplier(harvestState);
+
+    const getGoalIconCenter = (slotIdx: number): { x: number; y: number } | null => {
+      const iconEl = goalIconRefs[slotIdx]?.current;
+      if (!iconEl) return null;
+      const r = iconEl.getBoundingClientRect();
+      return {
+        x: (r.left + r.width / 2 - containerRect.left) / scale,
+        y: (r.top + r.height / 2 - containerRect.top) / scale,
+      };
+    };
 
     triggeredCells.forEach((cellIdx) => {
       const cell = grid[cellIdx];
       if (!cell.item) return;
-      
-      const baseValue = getCoinValueForLevel(cell.item.level);
-      let value = baseValue * cropValueMultiplier;
-      
-      if (cropSynergyMultiplier > 1.0 && hasAdjacentSameLevel(cellIdx, grid)) {
-        value *= cropSynergyMultiplier;
-      }
-      
-      // Apply 2x multiplier for fertile cells
-      if (cell.fertile) {
-        value *= 2;
-      }
-      value = Math.floor(value);
+
+      const level = cell.item.level;
+      const slotIdx = level >= 1 && level <= 5 ? level - 1 : -1;
+      const hasGoalForPlant = slotIdx >= 0 && goalSlots[slotIdx] === 'green' && goalCounts[slotIdx] > 0;
 
       const hexEl = document.getElementById(`hex-${cellIdx}`);
       if (!hexEl) return;
-      
+
       const hexRect = hexEl.getBoundingClientRect();
       const startX = (hexRect.left + hexRect.width / 2 - containerRect.left) / scale;
       const startY = (hexRect.top + hexRect.height / 2 - containerRect.top) / scale;
@@ -1176,20 +1239,43 @@ export default function App() {
       const panelHeightPx = 14;
       const offsetUp = (panelHeightPx / 2 + 4) * 0.8;
       const hoverY = hexTopY - offsetUp;
-      const dist = Math.hypot(hoverX - walletCenterX, hoverY - walletCenterY);
-      
-      panelsWithDist.push({
-        dist,
-        panel: {
-          id: `merge-harvest-${cellIdx}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          value,
-          startX,
-          startY,
-          hoverX,
-          hoverY,
-          moveToWalletDelayMs: 0,
-        },
-      });
+
+      if (hasGoalForPlant) {
+        const goalCenter = getGoalIconCenter(slotIdx);
+        const dist = goalCenter ? Math.hypot(hoverX - goalCenter.x, hoverY - goalCenter.y) : 0;
+        plantPanelsWithDist.push({
+          dist,
+          panel: {
+            id: `merge-plant-${cellIdx}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            goalSlotIdx: slotIdx,
+            iconSrc: GOAL_ICONS[slotIdx],
+            startX,
+            startY,
+            hoverX,
+            hoverY,
+            moveToTargetDelayMs: 0,
+          },
+        });
+      } else {
+        const baseValue = getCoinValueForLevel(level);
+        let value = baseValue * cropValueMultiplier;
+        if (cropSynergyMultiplier > 1.0 && hasAdjacentSameLevel(cellIdx, grid)) value *= cropSynergyMultiplier;
+        if (cell.fertile) value *= 2;
+        value = Math.floor(value);
+        const dist = Math.hypot(hoverX - walletCenterX, hoverY - walletCenterY);
+        coinPanelsWithDist.push({
+          dist,
+          panel: {
+            id: `merge-harvest-${cellIdx}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            value,
+            startX,
+            startY,
+            hoverX,
+            hoverY,
+            moveToWalletDelayMs: 0,
+          },
+        });
+      }
 
       // Spawn leaf burst for harvested cell
       setLeafBurstsSmall((prev) => [
@@ -1216,24 +1302,35 @@ export default function App() {
       ]);
     });
 
-    // Spawn coin panels with staggered animation (plants are NOT removed)
-    if (panelsWithDist.length > 0) {
-      const N = panelsWithDist.length;
-      const minDist = Math.min(...panelsWithDist.map((x) => x.dist));
-      const maxDist = Math.max(...panelsWithDist.map((x) => x.dist));
+    if (coinPanelsWithDist.length > 0) {
+      const N = coinPanelsWithDist.length;
+      const minDist = Math.min(...coinPanelsWithDist.map((x) => x.dist));
+      const maxDist = Math.max(...coinPanelsWithDist.map((x) => x.dist));
       const range = maxDist - minDist || 1;
       const maxStaggerMs = N <= 1 ? 0 : Math.min(200, 200 * (N - 1) / 4);
-      const panels: CoinPanelData[] = panelsWithDist.map(({ panel, dist }) => ({
+      const panels: CoinPanelData[] = coinPanelsWithDist.map(({ panel, dist }) => ({
         ...panel,
         moveToWalletDelayMs: ((dist - minDist) / range) * maxStaggerMs,
       }));
       setActiveCoinPanels(prev => [...prev, ...panels]);
     }
 
-    // Trigger bounce animation on harvested cells
+    if (plantPanelsWithDist.length > 0) {
+      const N = plantPanelsWithDist.length;
+      const minDist = Math.min(...plantPanelsWithDist.map((x) => x.dist));
+      const maxDist = Math.max(...plantPanelsWithDist.map((x) => x.dist));
+      const range = maxDist - minDist || 1;
+      const maxStaggerMs = N <= 1 ? 0 : Math.min(200, 200 * (N - 1) / 4);
+      const panels: PlantPanelData[] = plantPanelsWithDist.map(({ panel, dist }) => ({
+        ...panel,
+        moveToTargetDelayMs: ((dist - minDist) / range) * maxStaggerMs,
+      }));
+      setActivePlantPanels(prev => [...prev, ...panels]);
+    }
+
     setHarvestBounceCellIndices(triggeredCells);
     setTimeout(() => setHarvestBounceCellIndices([]), 250);
-  }, [grid, harvestState]);
+  }, [grid, harvestState, goalSlots, goalCounts]);
 
   /**
    * At 100% harvest progress: perform harvest (spawn coin panels, leaf bursts), flash white, reset to 0%.
@@ -1499,39 +1596,114 @@ export default function App() {
                 />
               </div>
 
-              {/* Goals Area - 5 goals, overlapping, left justified */}
+              {/* Goals Area - 5 goals, overlapping, left justified; compact when one completes (slide-over) */}
               <div 
-                className="relative w-full z-20 flex-shrink-0 flex items-start justify-start"
-                style={{
-                  height: '100px',
-                  marginLeft: 20,
-                }}
+                className="relative w-full z-20 flex-shrink-0 pointer-events-none"
+                style={{ height: '85px', marginLeft: 20 }}
               >
+                <div 
+                  className="absolute left-0 right-0 overflow-hidden"
+                  style={{ top: -55, height: 140, paddingTop: 55 }}
+                >
                 {[0, 1, 2, 3, 4].map((slotIdx) => {
+                  const visibleOrder = goalDisplayOrder.filter((i) => goalSlots[i] !== 'empty');
+                  const goalDisplayIndex = visibleOrder.indexOf(slotIdx);
                   const state = goalSlots[slotIdx];
-                  const isBouncing = goalBounceSlot === slotIdx;
+                  const isBouncing = goalBounceSlots.includes(slotIdx);
                   const isTransitioning = goalTransitionSlot === slotIdx;
                   const isLoadingState = state === 'loading';
                   const isGreenState = state === 'green';
+                  const isCompletedState = state === 'completed';
                   const isEmpty = state === 'empty';
                   const isFadingIn = slotIdx === goalSlotFadeInSlot;
-                  const showSlot = !isEmpty || isTransitioning;
+                  const isSlidingUp = goalSlidingUpSlots.has(slotIdx);
+                  const showSlot = !isEmpty || isTransitioning || isCompletedState;
                   const loadingOpacity = isLoadingState ? (goalTransitionFade ? 0 : 1) : isTransitioning ? (goalTransitionFade ? 0 : 1) : 0;
                   const greenOpacity = isGreenState ? 1 : isTransitioning ? (goalTransitionFade ? 1 : 0) : 0;
                   const showGreenContent = isGreenState || (isTransitioning && goalTransitionFade);
+                  const showCompletedContent = isCompletedState;
                   const showLoadingText = isLoadingState && !goalTransitionFade;
+                  const handleCompletedTap = () => {
+                    if (!isCompletedState || isSlidingUp) return;
+                    setGoalSlidingUpSlots((prev) => new Set(prev).add(slotIdx));
+                    const iconEl = goalIconRefs[slotIdx]?.current;
+                    const container = containerRef.current;
+                    if (iconEl && container) {
+                      const r = iconEl.getBoundingClientRect();
+                      const cr = container.getBoundingClientRect();
+                      const startX = (r.left + r.width / 2 - cr.left) / appScale;
+                      const startY = (r.top + r.height / 2 - cr.top) / appScale;
+                      const value = goalCompletedValues[slotIdx] ?? 0;
+                      setActiveGoalCoinParticles((prev) => [...prev, { id: `goal-coin-${slotIdx}-${Date.now()}`, startX, startY, value }]);
+                      // Leaf burst at tap (leaf 3 & 4, same stats as normal merge burst)
+                      setGoalCoinLeafBursts((prev) => [...prev, {
+                        id: `goal-coin-lb-${nextGoalCoinBurstIdRef.current++}`,
+                        x: r.left + r.width / 2,
+                        y: r.top + r.height / 2 + 30,
+                        startTime: Date.now(),
+                      }]);
+                    }
+                    setTimeout(() => {
+                      const displayOrderBefore = goalDisplayOrder.filter((i) => goalSlots[i] !== 'empty');
+                      const completedPosition = displayOrderBefore.indexOf(slotIdx);
+                      const oldDisplayIndices = [0, 1, 2, 3, 4].map((i) => {
+                        const p = displayOrderBefore.indexOf(i);
+                        return p >= 0 ? p : -1;
+                      });
+                      const numSlidingGoals = displayOrderBefore.filter((_, pos) => pos > completedPosition).length;
+                      const slideDurationMs = 350;
+                      const staggerMs = 75;
+                      const totalSlideMs = slideDurationMs + Math.max(0, numSlidingGoals - 1) * staggerMs;
+
+                      setGoalSlots((s) => { const n = [...s]; n[slotIdx] = 'empty'; return n; });
+                      setGoalCompletedValues((v) => { const n = [...v]; n[slotIdx] = 0; return n; });
+                      setGoalSlidingUpSlots((prev) => { const next = new Set(prev); next.delete(slotIdx); return next; });
+                      setGoalDisplayOrder((prev) => prev.filter((i) => i !== slotIdx));
+                      setGoalCompactionStagger((prev) => ({
+                        completedSlotIdx: slotIdx,
+                        completedPosition,
+                        oldDisplayIndices,
+                        isOverlapping: prev !== null,
+                      }));
+
+                      setTimeout(() => {
+                        setGoalCompactionStagger(null);
+                        setGoalSlots((s) => {
+                          const hasLoading = s.some((state) => state === 'loading');
+                          if (hasLoading) return s;
+                          const n = [...s];
+                          if (n[slotIdx] === 'empty') {
+                            n[slotIdx] = 'loading';
+                            setGoalDisplayOrder((prev) => (prev.includes(slotIdx) ? prev : [...prev, slotIdx]));
+                            setGoalSlotFadeInSlot(slotIdx);
+                            setGoalLoadingSeconds(5);
+                            setTimeout(() => setGoalSlotFadeInSlot(null), 500);
+                            return n;
+                          }
+                          return s;
+                        });
+                      }, totalSlideMs);
+                    }, 500);
+                  };
+                  const SLOT_STEP_PX = 75;
+                  const slideDelayMs = goalCompactionStagger && goalCompactionStagger.oldDisplayIndices[slotIdx] > goalCompactionStagger.completedPosition
+                    ? (goalCompactionStagger.isOverlapping ? 0 : (goalCompactionStagger.oldDisplayIndices[slotIdx] - goalCompactionStagger.completedPosition - 1) * 75)
+                    : 0;
                   return (
                     <div
                       key={slotIdx}
-                      className={`relative flex-shrink-0 ${isBouncing ? 'goal-bounce' : ''} ${isFadingIn ? 'goal-slot-fade-in' : ''}`}
+                      className={`absolute ${isFadingIn ? 'goal-no-transition' : 'goal-slide-over'} ${isBouncing ? 'goal-bounce' : ''} ${isFadingIn ? 'goal-slot-fade-in' : ''} ${isSlidingUp ? 'goal-slide-up' : ''} ${showCompletedContent ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'}`}
                       style={{
                         width: '105px',
                         height: '210px',
-                        marginRight: slotIdx < 4 ? '-30px' : 0,
+                        marginRight: '-30px',
                         marginTop: '-25px',
-                        opacity: showSlot ? 1 : 0,
-                        pointerEvents: showSlot ? 'auto' : 'none',
+                        left: goalDisplayIndex >= 0 ? goalDisplayIndex * SLOT_STEP_PX : -9999,
+                        opacity: isFadingIn ? undefined : (showSlot ? 1 : 0),
+                        visibility: goalDisplayIndex >= 0 ? 'visible' : 'hidden',
+                        transitionDelay: slideDelayMs ? `${slideDelayMs}ms` : undefined,
                       }}
+                      onClick={showCompletedContent && !isSlidingUp ? handleCompletedTap : undefined}
                     >
                       {showSlot && (
                         <>
@@ -1539,11 +1711,18 @@ export default function App() {
                           <img src={assetPath('/assets/goals/goal_loading.png')} alt="" className="absolute inset-0 w-full h-full object-contain object-top transition-opacity duration-100" style={{ zIndex: 2, opacity: loadingOpacity }} />
                           <img src={assetPath('/assets/goals/goal_green.png')} alt="" className="absolute inset-0 w-full h-full object-contain object-top transition-opacity duration-100" style={{ zIndex: 3, opacity: greenOpacity }} />
                           <img src={assetPath('/assets/goals/goal_yellow.png')} alt="" className="absolute inset-0 w-full h-full object-contain object-top" style={{ zIndex: 4, opacity: 0 }} />
-                          <img src={assetPath('/assets/goals/goal_white.png')} alt="" className="absolute inset-0 w-full h-full object-contain object-top" style={{ zIndex: 5, opacity: 0 }} />
-                          {showGreenContent && (
+                          <img src={assetPath('/assets/goals/goal_lightgreen.png')} alt="" className={`absolute inset-0 w-full h-full object-contain object-top ${goalImpactSlots.includes(slotIdx) && !isCompletedState ? 'goal-impact-lightgreen' : ''}`} style={{ zIndex: 5, opacity: goalImpactSlots.includes(slotIdx) && !isCompletedState ? undefined : 0 }} />
+                          <img src={assetPath('/assets/goals/goal_cream.png')} alt="" className="absolute inset-0 w-full h-full object-contain object-top" style={{ zIndex: 5, opacity: isCompletedState ? 1 : 0 }} />
+                          {showGreenContent && !showCompletedContent && (
                             <>
-                              <img src={assetPath('/assets/icons/icon_harvestboost.png')} alt="" className="absolute left-1/2 object-contain pointer-events-none transition-opacity duration-100" style={{ zIndex: 6, bottom: '71%', width: 40, height: 40, opacity: greenOpacity, transform: 'translate(-50%, -2px)' }} />
-                              <span className="absolute left-1/2 font-bold pointer-events-none transition-opacity duration-100" style={{ zIndex: 6, bottom: '62%', color: '#7e9b50', fontSize: '15px', opacity: greenOpacity, transform: 'translate(-50%, -1px)' }}>5</span>
+                              <img ref={goalIconRefs[slotIdx]} src={GOAL_ICONS[slotIdx]} alt="" className={`absolute left-1/2 object-contain pointer-events-none transition-opacity duration-100 ${goalImpactSlots.includes(slotIdx) ? 'goal-icon-bounce' : ''}`} style={{ zIndex: 6, bottom: '71%', width: 40, height: 40, opacity: greenOpacity, transform: 'translate(-50%, -2px)' }} />
+                              <span className="absolute left-1/2 font-bold pointer-events-none transition-opacity duration-100" style={{ zIndex: 6, bottom: '62%', color: goalImpactSlots.includes(slotIdx) ? '#537b38' : '#a1b54e', fontSize: '15px', opacity: greenOpacity, transform: 'translate(-50%, -1px)' }}>{goalCounts[slotIdx]}</span>
+                            </>
+                          )}
+                          {showCompletedContent && (
+                            <>
+                              <img ref={goalIconRefs[slotIdx]} src={assetPath('/assets/icons/icon_coin.png')} alt="" className={`absolute left-1/2 object-contain pointer-events-none ${isBouncing ? 'goal-icon-bounce' : ''}`} style={{ zIndex: 6, bottom: '71%', width: 40, height: 40, transform: 'translate(-50%, -2px)' }} />
+                              <span className="absolute left-1/2 font-bold pointer-events-none" style={{ zIndex: 6, bottom: '62%', color: '#c99959', fontSize: '15px', transform: 'translate(-50%, -1px)' }}>{goalCompletedValues[slotIdx]}</span>
                             </>
                           )}
                           {showLoadingText && (
@@ -1554,6 +1733,7 @@ export default function App() {
                     </div>
                   );
                 })}
+                </div>
               </div>
 
               <div 
@@ -1652,9 +1832,8 @@ export default function App() {
                         },
                       ]);
                       if (mergeResultLevel != null) {
-                        const baseValue = getCoinValueForLevel(mergeResultLevel);
-                        const cropMergingMultiplier = getCropMergingMultiplier(cropsState);
-                        const value = Math.floor(baseValue * cropMergingMultiplier);
+                        const slotIdx = mergeResultLevel >= 1 && mergeResultLevel <= 5 ? mergeResultLevel - 1 : -1;
+                        const hasGoalForPlant = slotIdx >= 0 && goalSlots[slotIdx] === 'green' && goalCounts[slotIdx] > 0;
                         const hexEl = document.getElementById(`hex-${cellIdx}`);
                         const panelHeightPx = 14;
                         const offsetUp = (panelHeightPx / 2 + 4) * 0.4;
@@ -1662,18 +1841,37 @@ export default function App() {
                         const hoverY = hexEl
                           ? ((hexEl.getBoundingClientRect().top - rect.top) / scale) - offsetUp
                           : py - offsetUp;
-                        setActiveCoinPanels((prev) => [
-                          ...prev,
-                          {
-                            id: `merge-${cellIdx}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-                            value,
-                            startX: px,
-                            startY: py,
-                            hoverX,
-                            hoverY,
-                            moveToWalletDelayMs: 0,
-                          },
-                        ]);
+                        if (hasGoalForPlant) {
+                          setActivePlantPanels((prev) => [
+                            ...prev,
+                            {
+                              id: `merge-plant-${cellIdx}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                              goalSlotIdx: slotIdx,
+                              iconSrc: GOAL_ICONS[slotIdx],
+                              startX: px,
+                              startY: py,
+                              hoverX,
+                              hoverY,
+                              moveToTargetDelayMs: 0,
+                            },
+                          ]);
+                        } else {
+                          const baseValue = getCoinValueForLevel(mergeResultLevel);
+                          const cropMergingMultiplier = getCropMergingMultiplier(cropsState);
+                          const value = Math.floor(baseValue * cropMergingMultiplier);
+                          setActiveCoinPanels((prev) => [
+                            ...prev,
+                            {
+                              id: `merge-${cellIdx}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                              value,
+                              startX: px,
+                              startY: py,
+                              hoverX,
+                              hoverY,
+                              moveToWalletDelayMs: 0,
+                            },
+                          ]);
+                        }
                       }
                     }}
                     onDeletePlant={(cellIdx, px, py) => {
@@ -1719,7 +1917,7 @@ export default function App() {
                   onTabChange={handleTabChange}
                   tabsWithOffers={tabsWithOffers}
                 />
-                <div className="flex-grow overflow-hidden relative">
+                <div className="flex-grow min-h-0 overflow-hidden relative flex flex-col">
                   <UpgradeList 
                     activeTab={activeTab} 
                     onTabChange={handleTabChange} 
@@ -1955,6 +2153,19 @@ export default function App() {
                 onComplete={() => setButtonLeafBursts((prev) => prev.filter((x) => x.id !== b.id))}
               />
             ))}
+            {goalCoinLeafBursts.map((b) => (
+              <LeafBurst
+                key={b.id}
+                x={b.x}
+                y={b.y}
+                startTime={b.startTime}
+                particleCount={LEAF_BURST_BASELINE_COUNT}
+                appScale={appScale}
+                spriteVariant="gold"
+                burstScale={1.25}
+                onComplete={() => setGoalCoinLeafBursts((prev) => prev.filter((x) => x.id !== b.id))}
+              />
+            ))}
             {cellHighlightBeams.map((b) => (
               <CellHighlightBeam
                 key={b.id}
@@ -2130,6 +2341,44 @@ export default function App() {
               onComplete={() => setActiveCoinPanels(prev => prev.filter((c) => c.id !== coin.id))}
             />
           ))}
+          {activePlantPanels.map((panel) => (
+            <PlantPanel
+              key={panel.id}
+              data={panel}
+              containerRef={containerRef}
+              targetRef={goalIconRefs[panel.goalSlotIdx]}
+              appScale={appScale}
+              onImpact={(goalSlotIdx) => {
+                setGoalBounceSlots((prev) => prev.includes(goalSlotIdx) ? prev : [...prev, goalSlotIdx]);
+                setGoalImpactSlots((prev) => prev.includes(goalSlotIdx) ? prev : [...prev, goalSlotIdx]);
+                setGoalCounts((c) => {
+                  const next = [...c];
+                  const prevCount = next[goalSlotIdx] ?? 0;
+                  next[goalSlotIdx] = Math.max(0, prevCount - 1);
+                  if (next[goalSlotIdx] === 0) {
+                    const plantValue = getCoinValueForLevel(goalSlotIdx + 1);
+                    const amountRequired = 5;
+                    setGoalCompletedValues((v) => {
+                      const vNext = [...v];
+                      vNext[goalSlotIdx] = plantValue * amountRequired * 2;
+                      return vNext;
+                    });
+                    setGoalSlots((s) => {
+                      const sNext = [...s];
+                      sNext[goalSlotIdx] = 'completed';
+                      return sNext;
+                    });
+                  }
+                  return next;
+                });
+                setTimeout(() => {
+                  setGoalBounceSlots((prev) => prev.filter((s) => s !== goalSlotIdx));
+                  setGoalImpactSlots((prev) => prev.filter((s) => s !== goalSlotIdx));
+                }, 400); // Clear before animation ends so text is #a1b54e by 0% light green
+              }}
+              onComplete={() => setActivePlantPanels(prev => prev.filter((p) => p.id !== panel.id))}
+            />
+          ))}
           {walletBursts.map((burst) => (
             <WalletImpactBurst
               key={burst.id}
@@ -2138,6 +2387,24 @@ export default function App() {
               containerRef={containerRef}
               appScale={appScale}
               onComplete={() => setWalletBursts((prev) => prev.filter((b) => b.id !== burst.id))}
+            />
+          ))}
+          {activeGoalCoinParticles.map((p) => (
+            <GoalCoinParticle
+              key={p.id}
+              data={p}
+              containerRef={containerRef}
+              walletRef={walletRef}
+              walletIconRef={walletIconRef}
+              appScale={appScale}
+              onImpact={(value) => {
+                setMoney((prev) => prev + value);
+                setWalletFlashActive(true);
+                setWalletBursts((prev) => [...prev, { id: nextWalletBurstIdRef.current++, trigger: Date.now() }]);
+                if (walletFlashTimeoutRef.current) clearTimeout(walletFlashTimeoutRef.current);
+                walletFlashTimeoutRef.current = setTimeout(() => setWalletFlashActive(false), 120);
+              }}
+              onComplete={() => setActiveGoalCoinParticles((prev) => prev.filter((x) => x.id !== p.id))}
             />
           ))}
           
