@@ -1436,11 +1436,11 @@ export default function App() {
 
               {/* Customer Area - sits between header and hex grid */}
               <div 
-                className="relative w-full z-20 flex-shrink-0"
+                className="relative w-full z-20 flex-shrink-0 border-0"
                 style={{
                   height: '100px',
-                  border: '2px dashed #000',
-                  backgroundColor: 'transparent',
+                  border: 'none',
+                  outline: 'none',
                 }}
               >
                 {/* Customer content will go here */}
@@ -1449,9 +1449,6 @@ export default function App() {
               <div 
                 ref={hexAreaRef}
                 className="relative flex-grow flex flex-col items-center justify-center overflow-visible z-10"
-                style={{
-                  border: '2px dashed #0066ff',
-                }}
               >
                 {/* Only tapping this backdrop (background) closes the panel; hex cells and plants do not */}
                 <div
