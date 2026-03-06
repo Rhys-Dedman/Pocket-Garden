@@ -47,30 +47,6 @@ export const isSeedQualityMaxed = (seedsState: SeedsState, highestPlantEver: num
   return targetTier > highestPlantEver;
 };
 
-/** Check if crop_merging upgrade is at max level (2.0x) */
-export const isCropMergingMaxed = (cropsState: Record<string, UpgradeState>): boolean => {
-  const level = cropsState.crop_merging?.level ?? 0;
-  return level >= 10; // Max at level 10 (2.0x)
-};
-
-/** Get the crop merging multiplier (1.0x base + 0.1x per level) */
-export const getCropMergingMultiplier = (cropsState: Record<string, UpgradeState>): number => {
-  const level = cropsState.crop_merging?.level ?? 0;
-  return 1.0 + 0.1 * level;
-};
-
-/** Get the lucky merge chance percentage (5% per level, chance for +2 level upgrade on merge) */
-export const getLuckyMergeChance = (cropsState: Record<string, UpgradeState>): number => {
-  const level = cropsState.lucky_merge?.level ?? 0;
-  return level * 5;
-};
-
-/** Check if lucky_merge upgrade is at max level (50%) */
-export const isLuckyMergeMaxed = (cropsState: Record<string, UpgradeState>): boolean => {
-  const level = cropsState.lucky_merge?.level ?? 0;
-  return level >= 10; // Max at level 10 (50%)
-};
-
 /** Get the merge harvest chance percentage (5% per level, chance to harvest adjacent crops on merge) */
 export const getMergeHarvestChance = (cropsState: Record<string, UpgradeState>): number => {
   const level = cropsState.merge_harvest?.level ?? 0;
@@ -81,6 +57,11 @@ export const getMergeHarvestChance = (cropsState: Record<string, UpgradeState>):
 export const isMergeHarvestMaxed = (cropsState: Record<string, UpgradeState>): boolean => {
   const level = cropsState.merge_harvest?.level ?? 0;
   return level >= 10; // Max at level 10 (50%)
+};
+
+/** Get harvest speed level (now in Garden tab) */
+export const getHarvestSpeedLevel = (cropsState: Record<string, UpgradeState>): number => {
+  return cropsState?.harvest_speed?.level ?? 0;
 };
 
 /** Check if plot_expansion is maxed (no more locked cells to unlock) */
@@ -167,19 +148,19 @@ const UPGRADE_COSTS: Record<string, UpgradeCostConfig> = {
   bonus_seeds: { baseCost: 300, growth: 1.28 }, // Seed Luck
   seed_quality: { baseCost: 250, growth: 1, stageCosts: [250, 900, 3000, 10000] }, // Stage-based pricing
   
-  // CROPS (Plots)
-  plot_expansion: { baseCost: 150, growth: 1.35 },
-  crop_merging: { baseCost: 200, growth: 1.20 },
-  merge_harvest: { baseCost: 350, growth: 1.27 },
-  lucky_merge: { baseCost: 600, growth: 1.30 },
-  fertile_soil: { baseCost: 500, growth: 1.33 },
-  
-  // HARVEST
+  // CROPS (Garden)
   harvest_speed: { baseCost: 90, growth: 1.18 },
+  plot_expansion: { baseCost: 150, growth: 1.35 },
   crop_value: { baseCost: 250, growth: 1.23 },
-  crop_synergy: { baseCost: 300, growth: 1.24 },
-  harvest_boost: { baseCost: 180, growth: 1.22 },
-  lucky_harvest: { baseCost: 450, growth: 1.27 },
+  fertile_soil: { baseCost: 500, growth: 1.33 },
+  merge_harvest: { baseCost: 350, growth: 1.27 },
+
+  // HARVEST (Orders)
+  customer_speed: { baseCost: 100, growth: 1.20 },
+  market_value: { baseCost: 200, growth: 1.25 },
+  premium_orders: { baseCost: 150, growth: 1.22 },
+  surplus_sales: { baseCost: 120, growth: 1.18 },
+  happy_customer: { baseCost: 250, growth: 1.28 },
 };
 
 /** Calculate upgrade cost for a given level, rounded to nearest 5 */
@@ -213,27 +194,27 @@ const formatCost = (cost: number): string => {
 };
 
 const SEEDS_UPGRADES: UpgradeDef[] = [
-  { id: 'seed_production', name: 'Seed Production', icon: assetPath('/assets/icons/icon_seedproduction.png'), description: 'Increase automatic seed production speed' },
+  { id: 'seed_production', name: 'Production Speed', icon: assetPath('/assets/icons/icon_seedproduction.png'), description: 'Increase how fast seeds are produced' },
   { id: 'seed_quality', name: 'Seed Quality', icon: assetPath('/assets/icons/icon_seedquality.png') }, // Description is dynamic, rendered inline
-  { id: 'seed_storage', name: 'Seed Storage', icon: assetPath('/assets/icons/icon_seedstorage.png'), description: 'Increase the amount of seeds you can store' },
-  { id: 'seed_surplus', name: 'Seed Surplus', icon: assetPath('/assets/icons/icon_seedsurplus.png'), description: 'Extra seeds become coins when storage is full' },
-  { id: 'bonus_seeds', name: 'Seed Luck', icon: assetPath('/assets/icons/icon_luckyseed.png'), description: 'Increase the chance to produce a bonus plant' },
+  { id: 'seed_storage', name: 'Storage Capacity', icon: assetPath('/assets/icons/icon_seedstorage.png'), description: 'Increase the amount of seeds you can store' },
+  { id: 'seed_surplus', name: 'Surplus Seeds', icon: assetPath('/assets/icons/icon_seedsurplus.png'), description: 'Extra seeds become coins when storage is full' },
+  { id: 'bonus_seeds', name: 'Lucky Seed', icon: assetPath('/assets/icons/icon_luckyseed.png'), description: 'Increase the chance for seeds to grow an extra plant' },
 ];
 
 const CROPS_UPGRADES: UpgradeDef[] = [
-  { id: 'plot_expansion', name: 'Plot Expansion', icon: assetPath('/assets/icons/icon_plotexpansion.png'), description: 'Unlock additional plots for planting crops' },
-  { id: 'crop_merging', name: 'Crop Merging', icon: assetPath('/assets/icons/icon_cropmerge.png'), description: 'Multiply coins earned from merging crops' },
-  { id: 'merge_harvest', name: 'Merge Harvest', icon: assetPath('/assets/icons/icon_mergeharvest.png'), description: 'Merges have a chance to instantly harvest adjacent crops' },
-  { id: 'fertile_soil', name: 'Fertile Soil', icon: assetPath('/assets/icons/icon_fetilesoil.png'), description: 'Fertile plots double the value of crops when harvested' },
-  { id: 'lucky_merge', name: 'Lucky Merge', icon: assetPath('/assets/icons/icon_luckymerge.png'), description: 'Increase chance for merges to upgrade crops by +2 levels' },
+  { id: 'harvest_speed', name: 'Harvest Speed', icon: assetPath('/assets/icons/icon_harvestspeed.png'), description: 'Increase automatic harvest cycle speed' },
+  { id: 'plot_expansion', name: 'Garden Expansion', icon: assetPath('/assets/icons/icon_plotexpansion.png'), description: 'Unlock additional plots in the garden' },
+  { id: 'crop_value', name: 'Crop Yield', icon: assetPath('/assets/icons/icon_cropvalue.png'), description: 'Plants produce more crops per harvest' },
+  { id: 'fertile_soil', name: 'Fertile Soil', icon: assetPath('/assets/icons/icon_fetilesoil.png'), description: 'Fertile plots yield double crops when harvested' },
+  { id: 'merge_harvest', name: 'Chain Harvest', icon: assetPath('/assets/icons/icon_mergeharvest.png'), description: 'Increase chance for merges to harvest nearby plants' },
 ];
 
 const HARVEST_UPGRADES: UpgradeDef[] = [
-  { id: 'harvest_speed', name: 'Harvest Speed', icon: assetPath('/assets/icons/icon_harvestspeed.png'), description: 'Increase automatic harvest cycle speed' },
-  { id: 'crop_value', name: 'Crop Value', icon: assetPath('/assets/icons/icon_cropvalue.png'), description: 'Increase coin value of harvested crops' },
-  { id: 'harvest_boost', name: 'Harvest Boost', icon: assetPath('/assets/icons/icon_harvestboost.png'), description: 'Merging crops increases the crop cycle progress' },
-  { id: 'crop_synergy', name: 'Crop Synergy', icon: assetPath('/assets/icons/icon_cropsynergy.png'), description: 'Increase coin value from adjacent matching crops' },
-  { id: 'lucky_harvest', name: 'Lucky Harvest', icon: assetPath('/assets/icons/icon_luckyharvest.png'), description: 'Increase the chance for a double harvest' },
+  { id: 'customer_speed', name: 'Order Speed', icon: assetPath('/assets/icons/icon_customerspeed.png'), description: 'Reduce the time it takes for new orders to appear' },
+  { id: 'market_value', name: 'Market Value', icon: assetPath('/assets/icons/icon_marketvalue.png'), description: 'Increase the coins earned when completing orders' },
+  { id: 'premium_orders', name: 'Premium Orders', icon: assetPath('/assets/icons/icon_premiumorders.png'), description: 'More likely to get orders above level' },
+  { id: 'surplus_sales', name: 'Surplus Sales', icon: assetPath('/assets/icons/icon_surplussales.png'), description: 'Increase the coins earned from surplus plants' },
+  { id: 'happy_customer', name: 'Happy Customer', icon: assetPath('/assets/icons/icon_happycustomer.png'), description: 'Increase chance that customers pay double for orders' },
 ];
 
 const getUpgradesForTab = (tab: TabType): UpgradeDef[] => {
@@ -265,76 +246,97 @@ const getSeedsUpgradeValue = (upgradeId: string, level: number, seedsState?: See
   }
 };
 
-/** Current value display for Crops upgrades; null = show LV. */
+/** Current value display for Crops (Garden) upgrades; null = show LV. */
 const getCropsUpgradeValue = (upgradeId: string, level: number): string | null => {
-  switch (upgradeId) {
-    case 'crop_merging':
-      return `${(1.0 + 0.1 * level).toFixed(1)}x`;
-    case 'plot_expansion':
-      return `+1`;
-    case 'merge_harvest':
-      return `${level * 5}%`;
-    case 'fertile_soil':
-      return `+1`;
-    case 'lucky_merge':
-      return `${level * 5}%`;
-    default:
-      return null;
-  }
-};
-
-/** Current value display for Harvest upgrades; null = show LV. */
-const getHarvestUpgradeValue = (upgradeId: string, level: number): string | null => {
   switch (upgradeId) {
     case 'harvest_speed':
       return `${3 + level}/min`;
+    case 'plot_expansion':
+      return `+1`;
     case 'crop_value':
-      return `${(1.0 + 0.1 * level).toFixed(1)}x`;
-    case 'harvest_boost':
-      return `${level * 2}%`;
-    case 'crop_synergy':
-      return `${(1.0 + 0.1 * level).toFixed(1)}x`;
-    case 'lucky_harvest':
+      return `${Math.min(10, 1 + level)}`;
+    case 'fertile_soil':
+      return `+1`;
+    case 'merge_harvest':
       return `${level * 5}%`;
     default:
       return null;
   }
 };
 
-/** Get the crop value multiplier (1.0x base + 0.1x per level) */
-export const getCropValueMultiplier = (harvestState: HarvestState): number => {
-  const level = harvestState?.crop_value?.level ?? 0;
-  return 1.0 + 0.1 * level;
+/** Current value display for Harvest (Orders) upgrades; null = show LV. */
+const getHarvestUpgradeValue = (upgradeId: string, level: number): string | null => {
+  switch (upgradeId) {
+    case 'customer_speed':
+      return `${Math.max(0, 30 - 5 * level)}s`;
+    case 'market_value':
+      return `${(1 + 0.5 * level).toFixed(1)}x`;
+    case 'premium_orders':
+      return `${1 + level}`;
+    case 'surplus_sales':
+      return `${(1 + 0.2 * level).toFixed(1)}x`;
+    case 'happy_customer':
+      return `${Math.min(50, level * 5)}%`;
+    default:
+      return null;
+  }
 };
 
-/** Get the harvest boost percentage (2% per level) */
-export const getHarvestBoostPercent = (harvestState: HarvestState): number => {
-  const level = harvestState?.harvest_boost?.level ?? 0;
-  return level * 2;
+/** Crop Yield: resources per plant harvest (1 base + 1 per level, max 10). Affects goal progress, not coins. */
+export const getCropYieldPerHarvest = (cropsState: Record<string, UpgradeState>): number => {
+  const level = cropsState?.crop_value?.level ?? 0;
+  return Math.min(10, 1 + level);
 };
 
-/** Get the crop synergy multiplier (1.0x base + 0.1x per level) */
-export const getCropSynergyMultiplier = (harvestState: HarvestState): number => {
-  const level = harvestState?.crop_synergy?.level ?? 0;
-  return 1.0 + 0.1 * level;
+/** Check if crop_value (Crop Yield) is at max level (10 resources per harvest) */
+export const isCropYieldMaxed = (cropsState: Record<string, UpgradeState>): boolean => {
+  const level = cropsState?.crop_value?.level ?? 0;
+  return level >= 9; // 1 + 9 = 10 max
 };
 
-/** Get the lucky harvest chance percentage (5% per level) */
-export const getLuckyHarvestChance = (harvestState: HarvestState): number => {
-  const level = harvestState?.lucky_harvest?.level ?? 0;
-  return level * 5;
+/** Order Speed: goal loading time in seconds (30 base - 5 per level, min 0). Max at level 6. */
+export const getGoalLoadingSeconds = (harvestState: HarvestState): number => {
+  const level = harvestState?.customer_speed?.level ?? 0;
+  return Math.max(0, 30 - 5 * level);
 };
 
-/** Check if lucky_harvest upgrade is at max level (50%) */
-export const isLuckyHarvestMaxed = (harvestState: Record<string, UpgradeState>): boolean => {
-  const level = harvestState.lucky_harvest?.level ?? 0;
-  return level >= 10; // Max at level 10 (50%)
+export const isCustomerSpeedMaxed = (harvestState: Record<string, UpgradeState>): boolean => {
+  const level = harvestState?.customer_speed?.level ?? 0;
+  return level >= 6; // 30 - 30 = 0s
 };
 
-/** Check if harvest_boost upgrade is at max level (20%) */
-export const isHarvestBoostMaxed = (harvestState: Record<string, UpgradeState>): boolean => {
-  const level = harvestState.harvest_boost?.level ?? 0;
-  return level >= 10; // Max at level 10 (20%)
+/** Market Value: multiplier for goal completion coins (1.0 + 0.5 per level) */
+export const getMarketValueMultiplier = (harvestState: HarvestState): number => {
+  const level = harvestState?.market_value?.level ?? 0;
+  return 1 + 0.5 * level;
+};
+
+/** Premium Orders: minimum level for 50% above chance (1 + level). When creating order, 50% chance plant is above this. */
+export const getPremiumOrdersMinLevel = (harvestState: HarvestState): number => {
+  const level = harvestState?.premium_orders?.level ?? 0;
+  return 1 + level;
+};
+
+export const isPremiumOrdersMaxed = (harvestState: Record<string, UpgradeState>): boolean => {
+  const level = harvestState?.premium_orders?.level ?? 0;
+  return level >= 4; // Max at 5 (50% above level 5 = always 5)
+};
+
+/** Surplus Sales: multiplier for coin harvest (1.0 + 0.2 per level) */
+export const getSurplusSalesMultiplier = (harvestState: HarvestState): number => {
+  const level = harvestState?.surplus_sales?.level ?? 0;
+  return 1 + 0.2 * level;
+};
+
+/** Happy Customer: chance to double order payment (0-50%, 5% per level) */
+export const getHappyCustomerChance = (harvestState: HarvestState): number => {
+  const level = harvestState?.happy_customer?.level ?? 0;
+  return Math.min(50, level * 5);
+};
+
+export const isHappyCustomerMaxed = (harvestState: Record<string, UpgradeState>): boolean => {
+  const level = harvestState?.happy_customer?.level ?? 0;
+  return level >= 10; // 50%
 };
 
 const TABS: TabType[] = ['SEEDS', 'CROPS', 'HARVEST'];
@@ -375,20 +377,20 @@ export const createInitialSeedsState = (): SeedsState => ({
 
 /** Initial crops state: all upgrades start at level 0 */
 export const createInitialCropsState = (): Record<string, UpgradeState> => ({
-  crop_merging: { level: 0, progress: 0 },
+  harvest_speed: { level: 0, progress: 0 },
   plot_expansion: { level: 1, progress: 0 },
-  merge_harvest: { level: 0, progress: 0 },
+  crop_value: { level: 0, progress: 0 },
   fertile_soil: { level: 0, progress: 0 },
-  lucky_merge: { level: 0, progress: 0 },
+  merge_harvest: { level: 0, progress: 0 },
 });
 
-/** Initial harvest state: all upgrades start at level 0 */
+/** Initial harvest (Orders) state: all upgrades start at level 0 */
 export const createInitialHarvestState = (): Record<string, UpgradeState> => ({
-  harvest_speed: { level: 0, progress: 0 },
-  crop_value: { level: 0, progress: 0 },
-  harvest_boost: { level: 0, progress: 0 },
-  crop_synergy: { level: 0, progress: 0 },
-  lucky_harvest: { level: 0, progress: 0 },
+  customer_speed: { level: 0, progress: 0 },
+  market_value: { level: 0, progress: 0 },
+  premium_orders: { level: 0, progress: 0 },
+  surplus_sales: { level: 0, progress: 0 },
+  happy_customer: { level: 0, progress: 0 },
 });
 
 export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange, money, setMoney, seedsState: propsSeedsState, setSeedsState: propsSetSeedsState, harvestState: propsHarvestState, setHarvestState: propsSetHarvestState, cropsState: propsCropsState, setCropsState: propsSetCropsState, lockedCellCount = 0, onUnlockCell, fertilizableCellCount = 0, onFertilizeCell, highestPlantEver = 1, rewardedOffers = [], onRewardedOfferClick }) => {
@@ -410,6 +412,11 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
     HARVEST: useRef<HTMLDivElement>(null),
   };
 
+  const onTabChangeRef = useRef(onTabChange);
+  const activeTabRef = useRef(activeTab);
+  onTabChangeRef.current = onTabChange;
+  activeTabRef.current = activeTab;
+
   const [dragOffset, setDragOffset] = useState(0);
   const [isHorizontalDragging, setIsHorizontalDragging] = useState(false);
 
@@ -425,148 +432,117 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
       if (!el) return;
       let isDown = false;
       let directionLocked: 'none' | 'vertical' | 'horizontal' = 'none';
-      let startX: number;
-      let startY: number;
-      let scrollTop: number;
+      let startX = 0;
+      let startY = 0;
+      let scrollTop = 0;
       let velocityV = 0;
       let lastY = 0;
       let lastTime = 0;
       let rafId: number;
+      let scrollRafId: number;
+      let liveDeltaY = 0;
+      let liveDeltaX = 0;
 
       const momentumLoop = () => {
         if (!isDown && Math.abs(velocityV) > 0.1) {
           const maxScroll = el.scrollHeight - el.clientHeight;
           const nextScroll = el.scrollTop - velocityV;
           el.scrollTop = Math.max(0, Math.min(nextScroll, maxScroll));
-          velocityV *= 0.94; 
+          velocityV *= 0.94;
           rafId = requestAnimationFrame(momentumLoop);
         }
       };
 
-      const handleMouseDown = (e: MouseEvent) => {
-        isDown = true;
-        directionLocked = 'none';
-        velocityV = 0;
-        cancelAnimationFrame(rafId);
-        startX = e.pageX;
-        startY = e.pageY;
-        scrollTop = el.scrollTop;
-        lastY = e.pageY;
-        lastTime = Date.now();
-        window.addEventListener('mousemove', handleMouseMoveGlobal);
-        window.addEventListener('mouseup', handleMouseUpGlobal);
+      const scrollUpdateLoop = () => {
+        if (!isDown) return;
+        if (directionLocked === 'vertical') {
+          const maxScroll = el.scrollHeight - el.clientHeight;
+          el.scrollTop = Math.max(0, Math.min(scrollTop - liveDeltaY, maxScroll));
+        } else if (directionLocked === 'horizontal') {
+          setDragOffset(liveDeltaX);
+        }
+        scrollRafId = requestAnimationFrame(scrollUpdateLoop);
       };
 
-      const handleMouseMoveGlobal = (e: MouseEvent) => {
+      const handlePointerMove = (e: PointerEvent) => {
         if (!isDown) return;
         const dx = e.pageX - startX;
         const dy = e.pageY - startY;
+        liveDeltaX = dx;
+        liveDeltaY = dy;
         if (directionLocked === 'none') {
           if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
             directionLocked = Math.abs(dx) > Math.abs(dy) ? 'horizontal' : 'vertical';
             if (directionLocked === 'horizontal') setIsHorizontalDragging(true);
-          }
-          return;
-        }
-        if (directionLocked === 'horizontal') setDragOffset(dx);
-        else if (directionLocked === 'vertical') {
-          const now = Date.now();
-          if (now - lastTime > 0) velocityV = velocityV * 0.2 + (e.pageY - lastY) * 0.8;
-          el.scrollTop = Math.max(0, Math.min(scrollTop - dy, el.scrollHeight - el.clientHeight));
-          lastY = e.pageY;
-          lastTime = now;
-        }
-      };
-
-      const handleMouseUpGlobal = (e: MouseEvent) => {
-        if (!isDown) return;
-        isDown = false;
-        const finalDx = e.pageX - startX;
-        window.removeEventListener('mousemove', handleMouseMoveGlobal);
-        window.removeEventListener('mouseup', handleMouseUpGlobal);
-        if (directionLocked === 'horizontal') {
-          setIsHorizontalDragging(false);
-          setDragOffset(0);
-          const currentIndex = TABS.indexOf(activeTab);
-          if (finalDx > 100 && currentIndex > 0) onTabChange(TABS[currentIndex - 1]);
-          else if (finalDx < -100 && currentIndex < TABS.length - 1) onTabChange(TABS[currentIndex + 1]);
-        } else if (directionLocked === 'vertical' && Math.abs(velocityV) > 1) {
-          rafId = requestAnimationFrame(momentumLoop);
-        }
-      };
-
-      // Touch event handlers (mirror mouse handlers for mobile support)
-      const handleTouchStart = (e: TouchEvent) => {
-        if (e.touches.length !== 1) return;
-        isDown = true;
-        directionLocked = 'none';
-        velocityV = 0;
-        cancelAnimationFrame(rafId);
-        startX = e.touches[0].pageX;
-        startY = e.touches[0].pageY;
-        scrollTop = el.scrollTop;
-        lastY = e.touches[0].pageY;
-        lastTime = Date.now();
-      };
-
-      const handleTouchMove = (e: TouchEvent) => {
-        if (!isDown || e.touches.length !== 1) return;
-        const dx = e.touches[0].pageX - startX;
-        const dy = e.touches[0].pageY - startY;
-        if (directionLocked === 'none') {
-          if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
-            directionLocked = Math.abs(dx) > Math.abs(dy) ? 'horizontal' : 'vertical';
-            if (directionLocked === 'horizontal') setIsHorizontalDragging(true);
+            scrollRafId = requestAnimationFrame(scrollUpdateLoop);
           }
           return;
         }
         if (directionLocked === 'horizontal') {
           e.preventDefault();
-          setDragOffset(dx);
         } else if (directionLocked === 'vertical') {
           const now = Date.now();
-          if (now - lastTime > 0) velocityV = velocityV * 0.2 + (e.touches[0].pageY - lastY) * 0.8;
-          el.scrollTop = Math.max(0, Math.min(scrollTop - dy, el.scrollHeight - el.clientHeight));
-          lastY = e.touches[0].pageY;
+          if (now - lastTime > 0) velocityV = velocityV * 0.2 + (e.pageY - lastY) * 0.8;
+          lastY = e.pageY;
           lastTime = now;
         }
       };
 
-      const handleTouchEnd = (e: TouchEvent) => {
+      const handlePointerUp = (e: PointerEvent) => {
         if (!isDown) return;
         isDown = false;
-        const touch = e.changedTouches[0];
-        const finalDx = touch.pageX - startX;
+        cancelAnimationFrame(scrollRafId);
+        el.releasePointerCapture(e.pointerId);
+        window.removeEventListener('pointermove', handlePointerMove);
+        window.removeEventListener('pointerup', handlePointerUp);
+        window.removeEventListener('pointercancel', handlePointerUp);
+        const finalDx = e.pageX - startX;
         if (directionLocked === 'horizontal') {
           setIsHorizontalDragging(false);
           setDragOffset(0);
-          const currentIndex = TABS.indexOf(activeTab);
-          if (finalDx > 100 && currentIndex > 0) onTabChange(TABS[currentIndex - 1]);
-          else if (finalDx < -100 && currentIndex < TABS.length - 1) onTabChange(TABS[currentIndex + 1]);
+          const currentIndex = TABS.indexOf(activeTabRef.current);
+          if (finalDx > 100 && currentIndex > 0) onTabChangeRef.current(TABS[currentIndex - 1]);
+          else if (finalDx < -100 && currentIndex < TABS.length - 1) onTabChangeRef.current(TABS[currentIndex + 1]);
         } else if (directionLocked === 'vertical' && Math.abs(velocityV) > 1) {
           rafId = requestAnimationFrame(momentumLoop);
         }
       };
 
-      el.addEventListener('mousedown', handleMouseDown);
-      el.addEventListener('touchstart', handleTouchStart, { passive: true });
-      el.addEventListener('touchmove', handleTouchMove, { passive: false });
-      el.addEventListener('touchend', handleTouchEnd);
-      el.addEventListener('touchcancel', handleTouchEnd);
-      
-      cleanups.push(() => {
-        el.removeEventListener('mousedown', handleMouseDown);
-        window.removeEventListener('mousemove', handleMouseMoveGlobal);
-        window.removeEventListener('mouseup', handleMouseUpGlobal);
-        el.removeEventListener('touchstart', handleTouchStart);
-        el.removeEventListener('touchmove', handleTouchMove);
-        el.removeEventListener('touchend', handleTouchEnd);
-        el.removeEventListener('touchcancel', handleTouchEnd);
+      const handlePointerDown = (e: PointerEvent) => {
+        if (e.button !== 0 && e.pointerType === 'mouse') return;
+        // Don't capture when tapping buttons - allows upgrade/rewarded-offer clicks to work
+        if ((e.target as Element).closest?.('button')) return;
+        isDown = true;
+        directionLocked = 'none';
+        velocityV = 0;
+        liveDeltaY = 0;
+        liveDeltaX = 0;
         cancelAnimationFrame(rafId);
+        cancelAnimationFrame(scrollRafId);
+        startX = e.pageX;
+        startY = e.pageY;
+        scrollTop = el.scrollTop;
+        lastY = e.pageY;
+        lastTime = Date.now();
+        el.setPointerCapture(e.pointerId);
+        window.addEventListener('pointermove', handlePointerMove, { passive: false });
+        window.addEventListener('pointerup', handlePointerUp);
+        window.addEventListener('pointercancel', handlePointerUp);
+      };
+
+      el.addEventListener('pointerdown', handlePointerDown);
+
+      cleanups.push(() => {
+        el.removeEventListener('pointerdown', handlePointerDown);
+        window.removeEventListener('pointermove', handlePointerMove);
+        window.removeEventListener('pointerup', handlePointerUp);
+        window.removeEventListener('pointercancel', handlePointerUp);
+        cancelAnimationFrame(rafId);
+        cancelAnimationFrame(scrollRafId);
       });
     });
     return () => cleanups.forEach(c => c());
-  }, [activeTab, onTabChange]);
+  }, []);
 
   const handleUpgrade = (id: string, category: TabType, currentLevel: number) => {
     const cost = getUpgradeCostValue(id, currentLevel);
@@ -721,13 +697,13 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
         const isMaxed = 
           (upgrade.id === 'seed_quality' && isSeedQualityMaxed(stateMap as SeedsState, highestPlantEver)) ||
           (upgrade.id === 'bonus_seeds' && isBonusSeedMaxed(stateMap as SeedsState)) ||
-          (upgrade.id === 'crop_merging' && isCropMergingMaxed(stateMap)) ||
           (upgrade.id === 'plot_expansion' && isPlotExpansionMaxed(lockedCellCount)) ||
           (upgrade.id === 'fertile_soil' && isFertileSoilMaxed(fertilizableCellCount)) ||
-          (upgrade.id === 'lucky_merge' && isLuckyMergeMaxed(stateMap)) ||
+          (upgrade.id === 'crop_value' && isCropYieldMaxed(stateMap)) ||
           (upgrade.id === 'merge_harvest' && isMergeHarvestMaxed(stateMap)) ||
-          (upgrade.id === 'lucky_harvest' && isLuckyHarvestMaxed(stateMap)) ||
-          (upgrade.id === 'harvest_boost' && isHarvestBoostMaxed(stateMap));
+          (upgrade.id === 'customer_speed' && isCustomerSpeedMaxed(stateMap)) ||
+          (upgrade.id === 'premium_orders' && isPremiumOrdersMaxed(stateMap)) ||
+          (upgrade.id === 'happy_customer' && isHappyCustomerMaxed(stateMap));
         
         const descTextColor = '#c2b180';
         const buttonColor = '#cae060';
@@ -750,8 +726,12 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
         const displayValue = seedsValue ?? cropsValue ?? harvestValue;
         
         // For seed_quality, calculate the target tier (base tier + 1)
-        const seedQualityTargetTier = upgrade.id === 'seed_quality' 
-          ? getSeedTargetTier(stateMap as SeedsState) 
+        const seedQualityTargetTier = upgrade.id === 'seed_quality'
+          ? getSeedTargetTier(stateMap as SeedsState)
+          : null;
+        // For premium_orders, the min level for "above" (1 + level)
+        const premiumOrdersMinLevel = upgrade.id === 'premium_orders'
+          ? getPremiumOrdersMinLevel(stateMap as HarvestState)
           : null;
 
         return (
@@ -792,10 +772,14 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
                   )}
                 </div>
                 {/* Description - seed_quality has dynamic description, others use static or generic yield */}
-                <div className={`text-[11px] font-semibold mt-0.5 tracking-tight ${(upgrade.description || upgrade.id === 'seed_quality') ? '' : 'uppercase'} ${isFlashing ? 'text-[#386641]/50' : ''}`} style={{ color: isFlashing ? undefined : descTextColor }}>
+                <div className={`text-[11px] font-semibold mt-0.5 tracking-tight ${(upgrade.description || upgrade.id === 'seed_quality' || upgrade.id === 'premium_orders') ? '' : 'uppercase'} ${isFlashing ? 'text-[#386641]/50' : ''}`} style={{ color: isFlashing ? undefined : descTextColor }}>
                   {upgrade.id === 'seed_quality' ? (
                     <>
                       Increase the chance to produce level <span style={{ color: SEEDS_VALUE_GREEN, fontWeight: 700 }}>{seedQualityTargetTier}</span> plants
+                    </>
+                  ) : upgrade.id === 'premium_orders' && premiumOrdersMinLevel != null ? (
+                    <>
+                      More likely to get orders for crops above level <span style={{ color: SEEDS_VALUE_GREEN, fontWeight: 700 }}>{premiumOrdersMinLevel}</span>
                     </>
                   ) : (
                     upgrade.description ?? `YIELD: +${(state.level * 30).toFixed(0)}%`

@@ -19,6 +19,12 @@ const TAB_ICONS: Record<TabType, string> = {
   HARVEST: '🧺',
 };
 
+const TAB_LABELS: Record<TabType, string> = {
+  SEEDS: 'SEEDS',
+  CROPS: 'GARDEN',
+  HARVEST: 'ORDERS',
+};
+
 const NOTIFICATION_COLOR = '#e6803a';
 const NOTIFICATION_UNDERLINE_COLOR = '#f59d42';
 const NORMAL_UNDERLINE_COLOR = '#a7c957';
@@ -74,7 +80,7 @@ export const UpgradeTabs = forwardRef<UpgradeTabsRef, UpgradeTabsProps>(({ activ
               className="text-[11px] font-black tracking-[0.1em] transition-colors duration-300"
               style={{ color: getTextColor() }}
             >
-              {tab}
+              {TAB_LABELS[tab]}
             </span>
           </button>
         );

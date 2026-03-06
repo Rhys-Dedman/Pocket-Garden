@@ -3,7 +3,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { HexBoard } from './components/HexBoard';
 import { UpgradeTabs } from './components/UpgradeTabs';
-import { UpgradeList, createInitialSeedsState, createInitialHarvestState, createInitialCropsState, getSeedQualityPercent, getSeedBaseTier, getBonusSeedChance, getSeedSurplusValue, getCropValueMultiplier, getHarvestBoostPercent, getCropSynergyMultiplier, getLuckyHarvestChance, getCropMergingMultiplier, getLuckyMergeChance, getMergeHarvestChance, HarvestState, UpgradeState, RewardedOffer } from './components/UpgradeList';
+import { UpgradeList, createInitialSeedsState, createInitialHarvestState, createInitialCropsState, getSeedQualityPercent, getSeedBaseTier, getBonusSeedChance, getSeedSurplusValue, getCropYieldPerHarvest, getHarvestSpeedLevel, getMergeHarvestChance, getGoalLoadingSeconds, getMarketValueMultiplier, getPremiumOrdersMinLevel, getSurplusSalesMultiplier, getHappyCustomerChance, HarvestState, UpgradeState, RewardedOffer } from './components/UpgradeList';
 import { Navbar } from './components/Navbar';
 import { StoreScreen } from './components/StoreScreen';
 import { SideAction } from './components/SideAction';
@@ -40,6 +40,7 @@ const POPUP_ASSETS_TO_PRELOAD = [
   assetPath('/assets/popups/popup_divider.png'),
   assetPath('/assets/vfx/particle_leaf_1.png'),
   assetPath('/assets/vfx/particle_leaf_2.png'),
+  ...([1, 2, 3, 4, 5].map((n) => assetPath(`/assets/icons/icons_goals/icon_goal_${n}.png`))),
 ];
 
 POPUP_ASSETS_TO_PRELOAD.forEach((src) => {
@@ -47,14 +48,9 @@ POPUP_ASSETS_TO_PRELOAD.forEach((src) => {
   img.src = src;
 });
 
-/** Goal icons: 1 per slot (seed production, seed surplus, merge harvest, harvest boost, crop synergy) */
-const GOAL_ICONS = [
-  assetPath('/assets/icons/icon_seedproduction.png'),
-  assetPath('/assets/icons/icon_seedsurplus.png'),
-  assetPath('/assets/icons/icon_mergeharvest.png'),
-  assetPath('/assets/icons/icon_harvestboost.png'),
-  assetPath('/assets/icons/icon_cropsynergy.png'),
-];
+/** Goal icon for plant level: plant_N uses icon_goal_N.png (plants 1-5 for now) */
+const getGoalIconForPlantLevel = (plantLevel: number): string =>
+  assetPath(`/assets/icons/icons_goals/icon_goal_${Math.max(1, Math.min(5, plantLevel))}.png`);
 
 /** Plant names and descriptions for discovery popups */
 const PLANT_DATA: Record<number, { name: string; description: string }> = {
@@ -159,7 +155,8 @@ export default function App() {
   const [unlockingCellIndices, setUnlockingCellIndices] = useState<number[]>([]); // Cells currently playing unlock animation
   // Goals: slot 1-5, each is 'empty' | 'loading' | 'green' | 'completed'. Only 1 loading at a time.
   const [goalSlots, setGoalSlots] = useState<('empty' | 'loading' | 'green' | 'completed')[]>(['loading', 'empty', 'empty', 'empty', 'empty']);
-  const [goalLoadingSeconds, setGoalLoadingSeconds] = useState(5); // countdown 5->0
+  const [goalPlantTypes, setGoalPlantTypes] = useState<number[]>([0, 0, 0, 0, 0]); // plant level 1-5 per slot when green; 0 = not set
+  const [goalLoadingSeconds, setGoalLoadingSeconds] = useState(30); // countdown 30->0 (Order Speed)
   const [goalTransitionSlot, setGoalTransitionSlot] = useState<number | null>(null); // slot transitioning loading->green (for fade)
   const [goalTransitionFade, setGoalTransitionFade] = useState(false); // triggers fade: loading out, green in
   const [goalSlotFadeInSlot, setGoalSlotFadeInSlot] = useState<number | null>(null); // slot fading in 0→100% over 500ms; countdown waits until done
@@ -531,7 +528,7 @@ export default function App() {
     return () => cancelAnimationFrame(rafId);
   }, [seedProductionLevel, isLoading]);
 
-  // Goal loading countdown: 5s per slot. Don't start until slot is 100% faded in. When slot 1 bounces, slot 2 starts loading (0% opacity) and fades in over 500ms.
+  // Goal loading countdown: Order Speed (30s base - 5s per level, min 0). Don't start until slot is 100% faded in.
   const goalIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
     if (isLoading) return;
@@ -540,6 +537,40 @@ export default function App() {
     // Don't run countdown while slot is fading in (0→100% over 500ms)
     if (loadingIdx === goalSlotFadeInSlot) return;
     if (goalIntervalRef.current) clearInterval(goalIntervalRef.current);
+    const loadingSeconds = getGoalLoadingSeconds(harvestState);
+    if (loadingSeconds <= 0) {
+      // Instant: complete immediately
+      setGoalBounceSlots((prev) => prev.includes(loadingIdx) ? prev : [...prev, loadingIdx]);
+      setGoalTransitionSlot(loadingIdx);
+      setGoalTransitionFade(false);
+      const minLevel = getPremiumOrdersMinLevel(harvestState);
+      const aboveMin = Math.random() < 0.5;
+      const plantLevel = aboveMin
+        ? (minLevel >= 5 ? 5 : minLevel + 1 + Math.floor(Math.random() * (5 - minLevel)))
+        : 1 + Math.floor(Math.random() * minLevel);
+      setGoalPlantTypes((p) => { const n = [...p]; n[loadingIdx] = plantLevel; return n; });
+      setGoalCounts((c) => { const next = [...c]; next[loadingIdx] = 5; return next; });
+      requestAnimationFrame(() => requestAnimationFrame(() => setGoalTransitionFade(true)));
+      setTimeout(() => {
+        const firstEmptyIdx = goalSlots.findIndex((s) => s === 'empty');
+        setGoalBounceSlots((prev) => prev.filter((s) => s !== loadingIdx));
+        setGoalSlots((slots) => {
+          const next = [...slots];
+          next[loadingIdx] = 'green';
+          if (firstEmptyIdx >= 0) next[firstEmptyIdx] = 'loading';
+          return next;
+        });
+        if (firstEmptyIdx >= 0) {
+          setGoalDisplayOrder((prev) => (prev.includes(firstEmptyIdx) ? prev : [...prev, firstEmptyIdx]));
+          setGoalSlotFadeInSlot(firstEmptyIdx);
+          setGoalLoadingSeconds(getGoalLoadingSeconds(harvestState));
+          setTimeout(() => setGoalSlotFadeInSlot(null), 500);
+        }
+        setGoalTransitionSlot(null);
+        setGoalTransitionFade(false);
+      }, 500);
+      return () => {};
+    }
     goalIntervalRef.current = setInterval(() => {
       setGoalLoadingSeconds((prev) => {
         if (prev <= 1) {
@@ -550,13 +581,18 @@ export default function App() {
           setGoalBounceSlots((prev) => prev.includes(loadingIdx) ? prev : [...prev, loadingIdx]);
           setGoalTransitionSlot(loadingIdx);
           setGoalTransitionFade(false);
+          const minLevel = getPremiumOrdersMinLevel(harvestState);
+          const aboveMin = Math.random() < 0.5;
+          const plantLevel = aboveMin
+            ? (minLevel >= 5 ? 5 : minLevel + 1 + Math.floor(Math.random() * (5 - minLevel)))
+            : 1 + Math.floor(Math.random() * minLevel);
+          setGoalPlantTypes((p) => { const n = [...p]; n[loadingIdx] = plantLevel; return n; });
           setGoalCounts((c) => {
             const next = [...c];
             next[loadingIdx] = 5;
             return next;
           });
           requestAnimationFrame(() => requestAnimationFrame(() => setGoalTransitionFade(true)));
-          // After bounce 100% complete (500ms): set slot green, then initiate next slot (first empty, at far right)
           setTimeout(() => {
             const firstEmptyIdx = goalSlots.findIndex((s) => s === 'empty');
             setGoalBounceSlots((prev) => prev.filter((s) => s !== loadingIdx));
@@ -569,12 +605,12 @@ export default function App() {
             if (firstEmptyIdx >= 0) {
               setGoalDisplayOrder((prev) => (prev.includes(firstEmptyIdx) ? prev : [...prev, firstEmptyIdx]));
               setGoalSlotFadeInSlot(firstEmptyIdx);
-              setGoalLoadingSeconds(5);
+              setGoalLoadingSeconds(getGoalLoadingSeconds(harvestState));
               setTimeout(() => setGoalSlotFadeInSlot(null), 500);
             }
             setGoalTransitionSlot(null);
             setGoalTransitionFade(false);
-          }, 500); // bounce duration 500ms
+          }, 500);
           return 0;
         }
         return prev - 1;
@@ -586,7 +622,7 @@ export default function App() {
         goalIntervalRef.current = null;
       }
     };
-  }, [isLoading, goalSlots, goalSlotFadeInSlot]);
+  }, [isLoading, goalSlots, goalSlotFadeInSlot, harvestState]);
 
   /**
    * At 100% seed progress: add one seed to storage (if room), reset to 0% immediately.
@@ -642,7 +678,7 @@ export default function App() {
   }, [seedProgress, isSeedFlashing, seedStorageMax, seedsInStorage, seedsState]);
 
   // Harvest Speed upgrade: auto-increase progress when level >= 1. Rate = level completions per minute (+1/min per upgrade).
-  const harvestSpeedLevel = harvestState?.harvest_speed?.level ?? 0;
+  const harvestSpeedLevel = getHarvestSpeedLevel(cropsState);
   const lastHarvestProgressTimeRef = useRef<number>(0);
   const harvestProgressRef = useRef<number>(0);
   const harvestTapZoomRef = useRef<{ start: number; end: number; startTime: number; duration: number } | null>(null);
@@ -1023,7 +1059,7 @@ export default function App() {
     return adjacentIndices;
   };
 
-  // Perform a single harvest (used for both normal and lucky double harvest)
+  // Perform a single harvest
   // Plant harvest: if goal exists for plant level (1-5 → slot 0-4), spawn plant panel to goal. Else spawn coin panel.
   const performHarvest = useCallback((delayMs: number = 0, idSuffix: string = '') => {
     const container = containerRef.current;
@@ -1042,9 +1078,7 @@ export default function App() {
       const coinPanelsWithDist: { panel: CoinPanelData; dist: number }[] = [];
       const plantPanelsWithDist: { panel: PlantPanelData; dist: number }[] = [];
 
-      const cropValueMultiplier = getCropValueMultiplier(harvestState);
-      const cropSynergyMultiplier = getCropSynergyMultiplier(harvestState);
-      const synergyCellIndices: number[] = [];
+      const cropYieldPerHarvest = getCropYieldPerHarvest(cropsState);
 
       const getGoalIconCenter = (slotIdx: number): { x: number; y: number } | null => {
         const iconEl = goalIconRefs[slotIdx]?.current;
@@ -1056,12 +1090,15 @@ export default function App() {
         };
       };
 
+      const surplusMultiplier = getSurplusSalesMultiplier(harvestState);
       grid.forEach((cell, cellIdx) => {
         if (!cell.item) return;
         harvestCellIndices.push(cellIdx);
         const level = cell.item.level;
-        const slotIdx = level >= 1 && level <= 5 ? level - 1 : -1;
-        const hasGoalForPlant = slotIdx >= 0 && goalSlots[slotIdx] === 'green' && goalCounts[slotIdx] > 0;
+        const slotIdx = level >= 1 && level <= 5
+          ? goalPlantTypes.findIndex((pt, i) => pt === level && goalSlots[i] === 'green' && goalCounts[i] > 0)
+          : -1;
+        const hasGoalForPlant = slotIdx >= 0;
 
         const hexEl = document.getElementById(`hex-${cellIdx}`);
         if (!hexEl) return;
@@ -1077,12 +1114,14 @@ export default function App() {
         if (hasGoalForPlant) {
           const goalCenter = getGoalIconCenter(slotIdx);
           const dist = goalCenter ? Math.hypot(hoverX - goalCenter.x, hoverY - goalCenter.y) : 0;
+          const plantLevel = goalPlantTypes[slotIdx] ?? slotIdx + 1;
           plantPanelsWithDist.push({
             dist,
             panel: {
               id: `plant-${cellIdx}-${Date.now()}-${Math.random().toString(36).slice(2)}${idSuffix}`,
               goalSlotIdx: slotIdx,
-              iconSrc: GOAL_ICONS[slotIdx],
+              iconSrc: getGoalIconForPlantLevel(plantLevel),
+              harvestAmount: cropYieldPerHarvest,
               startX,
               startY,
               hoverX,
@@ -1092,14 +1131,9 @@ export default function App() {
           });
         } else {
           const baseValue = getCoinValueForLevel(level);
-          let value = baseValue * cropValueMultiplier;
-          const hasSynergy = cropSynergyMultiplier > 1.0 && hasAdjacentSameLevel(cellIdx, grid);
-          if (hasSynergy) {
-            value *= cropSynergyMultiplier;
-            synergyCellIndices.push(cellIdx);
-          }
+          let value = baseValue;
           if (cell.fertile) value *= 2;
-          value = Math.floor(value);
+          value = Math.floor(value * surplusMultiplier);
           const dist = Math.hypot(hoverX - walletCenterX, hoverY - walletCenterY);
           coinPanelsWithDist.push({
             dist,
@@ -1136,24 +1170,6 @@ export default function App() {
           }
         });
 
-        synergyCellIndices.forEach((cellIdx) => {
-          const hexEl = document.getElementById(`hex-${cellIdx}`);
-          if (hexEl) {
-            const r = hexEl.getBoundingClientRect();
-            setCellHighlightBeams((prev) => [
-              ...prev,
-              {
-                id: `synergy-highlight-${cellIdx}-${Date.now()}-${Math.random().toString(36).slice(2)}${idSuffix}`,
-                x: r.left + r.width / 2,
-                y: r.top + r.height / 2,
-                cellWidth: r.width,
-                cellHeight: r.height,
-                startTime: Date.now(),
-              },
-            ]);
-          }
-        });
-
         if (coinPanelsWithDist.length > 0) {
           const N = coinPanelsWithDist.length;
           const minDist = Math.min(...coinPanelsWithDist.map((x) => x.dist));
@@ -1181,7 +1197,7 @@ export default function App() {
         }
       }, delayMs);
     }
-  }, [grid, harvestState, goalSlots, goalCounts]);
+  }, [grid, cropsState, goalSlots, goalCounts, goalPlantTypes, harvestState]);
 
   // Perform merge harvest: roll chance per adjacent cell to harvest (spawn coin or plant panel) without removing plant
   const performMergeHarvest = useCallback((centerCellIdx: number, chancePercent: number, excludeCellIdx?: number) => {
@@ -1207,8 +1223,8 @@ export default function App() {
 
     const coinPanelsWithDist: { panel: CoinPanelData; dist: number }[] = [];
     const plantPanelsWithDist: { panel: PlantPanelData; dist: number }[] = [];
-    const cropValueMultiplier = getCropValueMultiplier(harvestState);
-    const cropSynergyMultiplier = getCropSynergyMultiplier(harvestState);
+    const cropYieldPerHarvest = getCropYieldPerHarvest(cropsState);
+    const surplusMultiplier = getSurplusSalesMultiplier(harvestState);
 
     const getGoalIconCenter = (slotIdx: number): { x: number; y: number } | null => {
       const iconEl = goalIconRefs[slotIdx]?.current;
@@ -1225,8 +1241,10 @@ export default function App() {
       if (!cell.item) return;
 
       const level = cell.item.level;
-      const slotIdx = level >= 1 && level <= 5 ? level - 1 : -1;
-      const hasGoalForPlant = slotIdx >= 0 && goalSlots[slotIdx] === 'green' && goalCounts[slotIdx] > 0;
+      const slotIdx = level >= 1 && level <= 5
+        ? goalPlantTypes.findIndex((pt, i) => pt === level && goalSlots[i] === 'green' && goalCounts[i] > 0)
+        : -1;
+      const hasGoalForPlant = slotIdx >= 0;
 
       const hexEl = document.getElementById(`hex-${cellIdx}`);
       if (!hexEl) return;
@@ -1243,12 +1261,14 @@ export default function App() {
       if (hasGoalForPlant) {
         const goalCenter = getGoalIconCenter(slotIdx);
         const dist = goalCenter ? Math.hypot(hoverX - goalCenter.x, hoverY - goalCenter.y) : 0;
+        const plantLevel = goalPlantTypes[slotIdx] ?? slotIdx + 1;
         plantPanelsWithDist.push({
           dist,
           panel: {
             id: `merge-plant-${cellIdx}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
             goalSlotIdx: slotIdx,
-            iconSrc: GOAL_ICONS[slotIdx],
+            iconSrc: getGoalIconForPlantLevel(plantLevel),
+            harvestAmount: cropYieldPerHarvest,
             startX,
             startY,
             hoverX,
@@ -1258,10 +1278,9 @@ export default function App() {
         });
       } else {
         const baseValue = getCoinValueForLevel(level);
-        let value = baseValue * cropValueMultiplier;
-        if (cropSynergyMultiplier > 1.0 && hasAdjacentSameLevel(cellIdx, grid)) value *= cropSynergyMultiplier;
+        let value = baseValue;
         if (cell.fertile) value *= 2;
-        value = Math.floor(value);
+        value = Math.floor(value * surplusMultiplier);
         const dist = Math.hypot(hoverX - walletCenterX, hoverY - walletCenterY);
         coinPanelsWithDist.push({
           dist,
@@ -1330,56 +1349,29 @@ export default function App() {
 
     setHarvestBounceCellIndices(triggeredCells);
     setTimeout(() => setHarvestBounceCellIndices([]), 250);
-  }, [grid, harvestState, goalSlots, goalCounts]);
+  }, [grid, cropsState, goalSlots, goalCounts, goalPlantTypes, harvestState]);
 
   /**
    * At 100% harvest progress: perform harvest (spawn coin panels, leaf bursts), flash white, reset to 0%.
-   * Lucky Harvest: chance to trigger a second harvest with 200ms delay.
    */
   useEffect(() => {
     if (harvestProgress !== 100 || !isHarvestFlashing) return;
     
-    // Perform the first harvest immediately and trigger bounce
+    // Perform harvest and trigger bounce
     performHarvest(0, '');
     setHarvestBounceTrigger((t) => t + 1);
-    
-    // Lucky Harvest: check for double harvest
-    const luckyChance = getLuckyHarvestChance(harvestState);
-    const isLucky = luckyChance > 0 && Math.random() * 100 < luckyChance;
-    
-    if (isLucky) {
-      // Blink back to green briefly before second harvest
-      setTimeout(() => {
-        setIsHarvestFlashing(false); // Quick blink to green
-      }, 150);
-      
-      // Trigger second harvest after longer delay so green is visible
-      setTimeout(() => {
-        setIsHarvestFlashing(true); // Re-flash white for the second harvest
-        setHarvestBounceTrigger((t) => t + 1); // Re-bounce for the second harvest
-        performHarvest(0, '-lucky');
-      }, 300);
-    }
 
     // Reset to 0% and continue auto-progress
     harvestProgressRef.current = 0;
     setHarvestProgress(0);
-    setTimeout(() => setIsHarvestFlashing(false), isLucky ? 600 : 300);
-  }, [harvestProgress, isHarvestFlashing, performHarvest, harvestState]);
+    setTimeout(() => setIsHarvestFlashing(false), 300);
+  }, [harvestProgress, isHarvestFlashing, performHarvest]);
 
-  // Called by HexBoard when starting a merge to calculate level increase (includes lucky merge roll)
-  // Stores result in ref so handleMerge can use the same value
-  // Lucky Merge is blocked if it would skip discovering a new plant level
-  const getMergeLevelIncrease = useCallback((currentPlantLevel: number) => {
-    const luckyMergeChance = getLuckyMergeChance(cropsState);
-    // Block lucky merge if merging at highest level ever (would skip level highestPlantEver+1)
-    const wouldSkipNewLevel = currentPlantLevel >= highestPlantEver;
-    const canLuckyMerge = luckyMergeChance > 0 && !wouldSkipNewLevel;
-    const isLuckyMerge = canLuckyMerge && Math.random() * 100 < luckyMergeChance;
-    const levelIncrease = isLuckyMerge ? 2 : 1;
-    pendingMergeLevelIncreaseRef.current = levelIncrease;
-    return levelIncrease;
-  }, [cropsState, highestPlantEver]);
+  // Called by HexBoard when starting a merge to calculate level increase
+  const getMergeLevelIncrease = useCallback((_currentPlantLevel: number) => {
+    pendingMergeLevelIncreaseRef.current = 1;
+    return 1;
+  }, []);
 
   const handleMerge = (sourceIdx: number, targetIdx: number) => {
     // Check if this will be a merge before updating state
@@ -1418,37 +1410,8 @@ export default function App() {
       setDiscoveryPopup({ isVisible: true, level: newLevel });
     }
     
-    // Harvest Boost: increase harvest progress when merging
+    // Chain Harvest: per-cell chance to instantly harvest adjacent crops (without removing them)
     if (willMerge) {
-      const boostPercent = getHarvestBoostPercent(harvestState);
-      if (boostPercent > 0 && !isHarvestFlashing) {
-        const current = harvestProgressRef.current;
-        const next = Math.min(100, current + boostPercent);
-        harvestTapZoomRef.current = { start: current, end: next, startTime: Date.now(), duration: 100 };
-        setHarvestTapZoomTrigger((t) => t + 1);
-      }
-      
-      // Lucky Merge highlight: play VFX when +2 level upgrade triggers
-      if (levelIncrease === 2) {
-        const hexEl = document.getElementById(`hex-${targetIdx}`);
-        if (hexEl) {
-          const rect = hexEl.getBoundingClientRect();
-          setCellHighlightBeams((prev) => [
-            ...prev,
-            {
-              id: `lucky-merge-highlight-${targetIdx}-${Date.now()}`,
-              x: rect.left + rect.width / 2,
-              y: rect.top + rect.height / 2,
-              cellWidth: rect.width,
-              cellHeight: rect.height,
-              startTime: Date.now(),
-            },
-          ]);
-        }
-      }
-      
-      // Merge Harvest: per-cell chance to instantly harvest adjacent crops (without removing them)
-      // Exclude sourceIdx since that cell is now empty after the merge
       const mergeHarvestChance = getMergeHarvestChance(cropsState);
       if (mergeHarvestChance > 0) {
         performMergeHarvest(targetIdx, mergeHarvestChance, sourceIdx);
@@ -1656,6 +1619,7 @@ export default function App() {
                       const totalSlideMs = slideDurationMs + Math.max(0, numSlidingGoals - 1) * staggerMs;
 
                       setGoalSlots((s) => { const n = [...s]; n[slotIdx] = 'empty'; return n; });
+                      setGoalPlantTypes((p) => { const n = [...p]; n[slotIdx] = 0; return n; });
                       setGoalCompletedValues((v) => { const n = [...v]; n[slotIdx] = 0; return n; });
                       setGoalSlidingUpSlots((prev) => { const next = new Set(prev); next.delete(slotIdx); return next; });
                       setGoalDisplayOrder((prev) => prev.filter((i) => i !== slotIdx));
@@ -1676,7 +1640,7 @@ export default function App() {
                             n[slotIdx] = 'loading';
                             setGoalDisplayOrder((prev) => (prev.includes(slotIdx) ? prev : [...prev, slotIdx]));
                             setGoalSlotFadeInSlot(slotIdx);
-                            setGoalLoadingSeconds(5);
+                            setGoalLoadingSeconds(getGoalLoadingSeconds(harvestState));
                             setTimeout(() => setGoalSlotFadeInSlot(null), 500);
                             return n;
                           }
@@ -1715,7 +1679,7 @@ export default function App() {
                           <img src={assetPath('/assets/goals/goal_cream.png')} alt="" className="absolute inset-0 w-full h-full object-contain object-top" style={{ zIndex: 5, opacity: isCompletedState ? 1 : 0 }} />
                           {showGreenContent && !showCompletedContent && (
                             <>
-                              <img ref={goalIconRefs[slotIdx]} src={GOAL_ICONS[slotIdx]} alt="" className={`absolute left-1/2 object-contain pointer-events-none transition-opacity duration-100 ${goalImpactSlots.includes(slotIdx) ? 'goal-icon-bounce' : ''}`} style={{ zIndex: 6, bottom: '71%', width: 40, height: 40, opacity: greenOpacity, transform: 'translate(-50%, -2px)' }} />
+                              <img ref={goalIconRefs[slotIdx]} src={getGoalIconForPlantLevel(goalPlantTypes[slotIdx] ?? slotIdx + 1)} alt="" className={`absolute left-1/2 object-contain pointer-events-none transition-opacity duration-100 ${goalImpactSlots.includes(slotIdx) ? 'goal-icon-bounce' : ''}`} style={{ zIndex: 6, bottom: '71%', width: 40, height: 40, opacity: greenOpacity, transform: 'translate(-50%, -2px)' }} />
                               <span className="absolute left-1/2 font-bold pointer-events-none transition-opacity duration-100" style={{ zIndex: 6, bottom: '62%', color: goalImpactSlots.includes(slotIdx) ? '#537b38' : '#a1b54e', fontSize: '15px', opacity: greenOpacity, transform: 'translate(-50%, -1px)' }}>{goalCounts[slotIdx]}</span>
                             </>
                           )}
@@ -1726,7 +1690,7 @@ export default function App() {
                             </>
                           )}
                           {showLoadingText && (
-                            <span className="absolute left-1/2 font-bold pointer-events-none" style={{ zIndex: 6, bottom: '62%', color: '#fff4d0', fontSize: '15px', transform: 'translate(-50%, -1px)', opacity: 0.75 }}>{goalLoadingSeconds}s</span>
+                            <span className="absolute left-1/2 font-bold pointer-events-none" style={{ zIndex: 6, bottom: '64%', color: '#fff4d0', fontSize: '13px', transform: 'translate(-50%, -1px)', opacity: 0.75 }}>{goalLoadingSeconds}s</span>
                           )}
                         </>
                       )}
@@ -1832,8 +1796,10 @@ export default function App() {
                         },
                       ]);
                       if (mergeResultLevel != null) {
-                        const slotIdx = mergeResultLevel >= 1 && mergeResultLevel <= 5 ? mergeResultLevel - 1 : -1;
-                        const hasGoalForPlant = slotIdx >= 0 && goalSlots[slotIdx] === 'green' && goalCounts[slotIdx] > 0;
+                        const slotIdx = mergeResultLevel >= 1 && mergeResultLevel <= 5
+                          ? goalPlantTypes.findIndex((pt, i) => pt === mergeResultLevel && goalSlots[i] === 'green' && goalCounts[i] > 0)
+                          : -1;
+                        const hasGoalForPlant = slotIdx >= 0;
                         const hexEl = document.getElementById(`hex-${cellIdx}`);
                         const panelHeightPx = 14;
                         const offsetUp = (panelHeightPx / 2 + 4) * 0.4;
@@ -1842,12 +1808,14 @@ export default function App() {
                           ? ((hexEl.getBoundingClientRect().top - rect.top) / scale) - offsetUp
                           : py - offsetUp;
                         if (hasGoalForPlant) {
+                          const plantLevel = goalPlantTypes[slotIdx] ?? slotIdx + 1;
                           setActivePlantPanels((prev) => [
                             ...prev,
                             {
                               id: `merge-plant-${cellIdx}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
                               goalSlotIdx: slotIdx,
-                              iconSrc: GOAL_ICONS[slotIdx],
+                              iconSrc: getGoalIconForPlantLevel(plantLevel),
+                              harvestAmount: getCropYieldPerHarvest(cropsState),
                               startX: px,
                               startY: py,
                               hoverX,
@@ -1857,8 +1825,8 @@ export default function App() {
                           ]);
                         } else {
                           const baseValue = getCoinValueForLevel(mergeResultLevel);
-                          const cropMergingMultiplier = getCropMergingMultiplier(cropsState);
-                          const value = Math.floor(baseValue * cropMergingMultiplier);
+                          const surplusMultiplier = getSurplusSalesMultiplier(harvestState);
+                          const value = Math.floor(baseValue * surplusMultiplier);
                           setActiveCoinPanels((prev) => [
                             ...prev,
                             {
@@ -2348,19 +2316,23 @@ export default function App() {
               containerRef={containerRef}
               targetRef={goalIconRefs[panel.goalSlotIdx]}
               appScale={appScale}
-              onImpact={(goalSlotIdx) => {
+              onImpact={(goalSlotIdx, amount) => {
                 setGoalBounceSlots((prev) => prev.includes(goalSlotIdx) ? prev : [...prev, goalSlotIdx]);
                 setGoalImpactSlots((prev) => prev.includes(goalSlotIdx) ? prev : [...prev, goalSlotIdx]);
                 setGoalCounts((c) => {
                   const next = [...c];
                   const prevCount = next[goalSlotIdx] ?? 0;
-                  next[goalSlotIdx] = Math.max(0, prevCount - 1);
+                  next[goalSlotIdx] = Math.max(0, prevCount - amount);
                   if (next[goalSlotIdx] === 0) {
-                    const plantValue = getCoinValueForLevel(goalSlotIdx + 1);
+                    const plantLevel = goalPlantTypes[goalSlotIdx] ?? goalSlotIdx + 1;
+                    const plantValue = getCoinValueForLevel(plantLevel);
                     const amountRequired = 5;
+                    const marketMultiplier = getMarketValueMultiplier(harvestState);
+                    const rawValue = plantValue * amountRequired * 2 * marketMultiplier;
+                    const roundedValue = Math.round(rawValue / 5) * 5;
                     setGoalCompletedValues((v) => {
                       const vNext = [...v];
-                      vNext[goalSlotIdx] = plantValue * amountRequired * 2;
+                      vNext[goalSlotIdx] = roundedValue;
                       return vNext;
                     });
                     setGoalSlots((s) => {
@@ -2398,7 +2370,12 @@ export default function App() {
               walletIconRef={walletIconRef}
               appScale={appScale}
               onImpact={(value) => {
-                setMoney((prev) => prev + value);
+                let finalValue = value;
+                const happyChance = getHappyCustomerChance(harvestState);
+                if (happyChance > 0 && Math.random() * 100 < happyChance) {
+                  finalValue *= 2;
+                }
+                setMoney((prev) => prev + finalValue);
                 setWalletFlashActive(true);
                 setWalletBursts((prev) => [...prev, { id: nextWalletBurstIdRef.current++, trigger: Date.now() }]);
                 if (walletFlashTimeoutRef.current) clearTimeout(walletFlashTimeoutRef.current);

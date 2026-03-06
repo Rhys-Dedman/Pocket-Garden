@@ -38,6 +38,8 @@ export interface PlantPanelData {
   id: string;
   goalSlotIdx: number;
   iconSrc: string;
+  /** Resources contributed to goal per harvest (1 base, +1 per Crop Yield upgrade, max 10) */
+  harvestAmount?: number;
   startX: number;
   startY: number;
   hoverX: number;
@@ -49,7 +51,7 @@ interface PlantPanelProps {
   data: PlantPanelData;
   containerRef: React.RefObject<HTMLDivElement | null>;
   targetRef: React.RefObject<HTMLElement | null>;
-  onImpact: (goalSlotIdx: number) => void;
+  onImpact: (goalSlotIdx: number, amount: number) => void;
   onComplete: () => void;
   appScale?: number;
 }
@@ -178,7 +180,7 @@ export const PlantPanel: React.FC<PlantPanelProps> = ({
         if (t >= 1) {
           if (!impactFiredRef.current) {
             impactFiredRef.current = true;
-            onImpact(data.goalSlotIdx);
+            onImpact(data.goalSlotIdx, data.harvestAmount ?? 1);
           }
           setPhase('trailOnly');
           trailOnlyStartRef.current = now;
