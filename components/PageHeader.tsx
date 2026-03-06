@@ -23,6 +23,8 @@ interface PageHeaderProps {
   playerLevelGoalsRequired?: number;
   /** When this increments, triggers progress bar flash */
   playerLevelFlashTrigger?: number;
+  /** If true, hide the top bar background (e.g. for shed screen - keeps plant wallet + settings only) */
+  hideTopBarBg?: boolean;
 }
 
 const formatMoney = (amount: number): string => {
@@ -44,6 +46,7 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   playerLevelProgress = 0,
   playerLevelFlashTrigger = 0,
   playerLevelGoalsRequired = 2,
+  hideTopBarBg = false,
 }) => {
   const isInteractive = !!walletRef;
   const prevBurstRef = useRef(walletBurstCount);
@@ -84,7 +87,8 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
     <header className="z-10 shrink-0 px-2 pt-4 pb-2">
       {/* Top UI background - 3-slice: left cap (fixed), center (stretch), right cap (fixed) */}
       <div className="relative flex min-h-[44px]">
-        {/* 3-slice background layer */}
+        {/* 3-slice background layer - hidden when hideTopBarBg (e.g. shed screen) */}
+        {!hideTopBarBg && (
         <div className="absolute inset-0 flex w-full pointer-events-none">
           {/* Left cap - 0–184px of sprite, no stretch */}
           <div
@@ -97,10 +101,12 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
               backgroundPosition: 'left center',
             }}
           />
-          {/* Center - middle 232px stretched to fill (184-416px of sprite) */}
+          {/* Center - middle 232px stretched to fill (184-416px of sprite). -1px overlap hides sub-pixel gaps at scale. */}
           <div
             className="flex-1 min-w-[20px]"
             style={{
+              marginLeft: -1,
+              marginRight: -1,
               backgroundImage: `url(${bgUrl})`,
               backgroundSize: '258.6% 100%',
               backgroundRepeat: 'no-repeat',
@@ -119,6 +125,7 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
             }}
           />
         </div>
+        )}
         {/* Content on top */}
         <div className="relative z-10 flex justify-between items-center w-full min-h-[44px] px-3 py-2">
       <div className="flex items-center gap-4 ml-[13px]">
@@ -207,21 +214,14 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
             </div>
           </>
         ) : plantWallet ? (
-          <div
-            className="relative inline-flex items-center h-[22px] rounded-full border shadow-2xl overflow-visible w-fit min-w-0"
-            style={{
-              backgroundColor: '#775041',
-              borderWidth: 1,
-              borderColor: '#e9dcaf',
-            }}
-          >
+          <div className="relative flex items-center gap-1 bg-black/50 backdrop-blur-md pl-1 pr-2 py-1 rounded-full border-0 shadow-2xl overflow-hidden -ml-4">
             <span
-              className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center justify-center text-sm leading-none -ml-3 pointer-events-none"
+              className="relative flex items-center justify-center text-sm leading-none text-white"
               aria-hidden
             >
               🌱
             </span>
-            <span className="relative font-black text-xs tracking-tight text-[#fcf0c7] whitespace-nowrap pl-[20px] pr-3 py-1">
+            <span className="relative font-black text-xs tracking-tight text-white">
               {plantWallet.unlockedCount} / {plantWallet.totalCount}
             </span>
           </div>

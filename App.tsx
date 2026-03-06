@@ -2111,10 +2111,10 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Shed Header - overlay on top */}
+              {/* Shed Header - overlay on top (no top bar bg, just plant wallet + settings) */}
               <div className="absolute top-0 left-0 right-0 z-50 pointer-events-none">
                 <div className="pointer-events-auto">
-                  <PageHeader money={money} walletFlashActive={walletFlashActive} plantWallet={{ unlockedCount: highestPlantEver, totalCount: 24 }} />
+                  <PageHeader money={money} walletFlashActive={walletFlashActive} plantWallet={{ unlockedCount: highestPlantEver, totalCount: 24 }} hideTopBarBg />
                 </div>
               </div>
             </div>

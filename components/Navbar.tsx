@@ -180,15 +180,15 @@ export const Navbar: React.FC<NavbarProps> = ({ activeScreen, onScreenChange, ba
                   borderBottom: 'none',
                 }}
               />
-              {/* Stroke 2 (outer) - #171515 */}
+              {/* Stroke 2 (outer) - #171515, snug against inner stroke (1px offset) */}
               <div 
                 className="absolute pointer-events-none"
                 style={{
-                  top: '-2px',
-                  left: '-2px',
-                  right: '-2px',
+                  top: '-1px',
+                  left: '-1px',
+                  right: '-1px',
                   bottom: '0px',
-                  borderRadius: '16px 16px 0 0',
+                  borderRadius: '15px 15px 0 0',
                   border: '2px solid #171515',
                   borderBottom: 'none',
                 }}
