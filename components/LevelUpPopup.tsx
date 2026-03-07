@@ -25,6 +25,12 @@ interface LevelUpPopupProps {
   isVisible: boolean;
   onClose: () => void;
   level: number;
+  /** Dynamic title based on what's being unlocked (e.g. "Storage Capacity") */
+  title: string;
+  /** Dynamic description (e.g. "You can now increase the amount of seeds you can store") */
+  description: string;
+  /** Icon path for header (matches the upgrade being unlocked) */
+  icon: string;
   onUnlockNow: () => void;
   appScale?: number;
 }
@@ -82,6 +88,9 @@ export const LevelUpPopup: React.FC<LevelUpPopupProps> = ({
   isVisible,
   onClose,
   level,
+  title,
+  description,
+  icon,
   onUnlockNow,
   appScale = 1,
 }) => {
@@ -334,12 +343,12 @@ export const LevelUpPopup: React.FC<LevelUpPopupProps> = ({
               style={{ filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.25))' }}
             />
             <img
-              src={assetPath('/assets/icons/icon_premiumorders.png')}
+              src={icon}
               alt=""
               className="relative object-contain"
               style={{
-                width: '94px',
-                height: '94px',
+                width: '75px',
+                height: '75px',
                 filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))',
                 marginTop: '-4px',
               }}
@@ -381,18 +390,17 @@ export const LevelUpPopup: React.FC<LevelUpPopupProps> = ({
                   Level {level}
                 </h2>
 
-                {/* Subtitle - "More Customers" */}
+                {/* Subtitle - dynamic unlock title (e.g. "Storage Capacity") */}
                 <h3
                   className="font-black tracking-tight text-center"
                   style={{
                     color: '#5c4a32',
                     fontFamily: 'Inter, sans-serif',
                     marginTop: '-8px',
-                    whiteSpace: 'nowrap',
                     fontSize: '3.5rem',
                   }}
                 >
-                  More Customers
+                  {title}
                 </h3>
 
                 {/* Divider - popup_divider_Blue */}
@@ -405,7 +413,7 @@ export const LevelUpPopup: React.FC<LevelUpPopupProps> = ({
                   />
                 </div>
 
-                {/* Description - #76a0b7 */}
+                {/* Description - dynamic (e.g. "You can now increase the amount of seeds you can store") */}
                 <p
                   className="font-medium text-center leading-relaxed italic w-full"
                   style={{
@@ -416,7 +424,7 @@ export const LevelUpPopup: React.FC<LevelUpPopupProps> = ({
                     fontSize: '2rem',
                   }}
                 >
-                  you now have 1 more order available at a time
+                  {description}
                 </p>
 
                 <div className="flex-grow min-h-[48px]" />

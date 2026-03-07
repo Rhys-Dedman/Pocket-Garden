@@ -7,6 +7,8 @@ interface UpgradeTabsProps {
   onTabChange: (tab: TabType) => void;
   /** Tabs that currently have limited offers */
   tabsWithOffers?: Set<TabType>;
+  /** When true, panel is expanded (use stronger ease-out for opening) */
+  isExpanded?: boolean;
 }
 
 export interface UpgradeTabsRef {
@@ -16,7 +18,7 @@ export interface UpgradeTabsRef {
 const TAB_ICONS: Record<TabType, string> = {
   SEEDS: '🌱',
   CROPS: '🌻',
-  HARVEST: '🧺',
+  HARVEST: '🪙',
 };
 
 const TAB_LABELS: Record<TabType, string> = {
@@ -29,7 +31,7 @@ const NOTIFICATION_COLOR = '#e6803a';
 const NOTIFICATION_UNDERLINE_COLOR = '#f59d42';
 const NORMAL_UNDERLINE_COLOR = '#a7c957';
 
-export const UpgradeTabs = forwardRef<UpgradeTabsRef, UpgradeTabsProps>(({ activeTab, onTabChange, tabsWithOffers = new Set() }, ref) => {
+export const UpgradeTabs = forwardRef<UpgradeTabsRef, UpgradeTabsProps>(({ activeTab, onTabChange, tabsWithOffers = new Set(), isExpanded = false }, ref) => {
   const tabs: TabType[] = ['SEEDS', 'CROPS', 'HARVEST'];
   
   const tabRefs = useRef<Record<TabType, HTMLSpanElement | null>>({
@@ -71,6 +73,7 @@ export const UpgradeTabs = forwardRef<UpgradeTabsRef, UpgradeTabsProps>(({ activ
             key={tab}
             onClick={() => onTabChange(tab)}
             className={`flex-1 flex flex-row items-center justify-center space-x-1.5 transition-all duration-300 active:scale-95 h-full relative z-10`}
+            style={{ touchAction: 'manipulation' }}
           >
             <span className={`text-[9px] filter saturate-[0.8] ${isActive ? 'opacity-100' : 'opacity-40 grayscale'}`}>
               {TAB_ICONS[tab]}
@@ -88,7 +91,11 @@ export const UpgradeTabs = forwardRef<UpgradeTabsRef, UpgradeTabsProps>(({ activ
       
       {/* Active Tab Indicator - underline + triangle tip */}
       <div 
-        className="absolute bottom-0 h-[2px] transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] rounded-full z-20"
+        className="absolute bottom-0 h-[2px] transition-all rounded-full z-20"
+        style={{ 
+          transitionDuration: isExpanded ? '700ms' : '250ms',
+          transitionTimingFunction: isExpanded ? 'cubic-bezier(0.05, 0, 0, 1)' : 'cubic-bezier(0.22, 0, 0.12, 1)',
+        }}
         style={{
           width: '28%',
           left: activeTab === 'SEEDS' ? '4%' : activeTab === 'CROPS' ? '36%' : '68%',

@@ -125,6 +125,10 @@ interface UpgradeListProps {
   onRewardedOfferClick?: (offerId: string) => void;
   /** Player level (for Seeds tab upgrade locking) */
   playerLevel?: number;
+  /** When set, scroll to this upgrade and flash it blue (from level-up Unlock Now) */
+  pendingUnlockUpgradeId?: string | null;
+  /** When true, panel is expanded (use stronger ease-out for opening) */
+  isExpanded?: boolean;
 }
 
 interface UpgradeDef {
@@ -197,19 +201,67 @@ const formatCost = (cost: number): string => {
 
 const SEEDS_UPGRADES: UpgradeDef[] = [
   { id: 'seed_production', name: 'Production Speed', icon: assetPath('/assets/icons/icon_seedproduction.png'), description: 'Increase how fast seeds are produced' },
-  { id: 'seed_quality', name: 'Seed Quality', icon: assetPath('/assets/icons/icon_seedquality.png') }, // Description is dynamic, rendered inline
   { id: 'seed_storage', name: 'Storage Capacity', icon: assetPath('/assets/icons/icon_seedstorage.png'), description: 'Increase the amount of seeds you can store' },
+  { id: 'seed_quality', name: 'Seed Quality', icon: assetPath('/assets/icons/icon_seedquality.png') }, // Description is dynamic, rendered inline
   { id: 'seed_surplus', name: 'Surplus Seeds', icon: assetPath('/assets/icons/icon_seedsurplus.png'), description: 'Extra seeds become coins when storage is full' },
   { id: 'bonus_seeds', name: 'Lucky Seed', icon: assetPath('/assets/icons/icon_luckyseed.png'), description: 'Increase the chance for seeds to grow an extra plant' },
 ];
 
-/** Placeholder unlock levels for Seeds tab (top to bottom: 1st=lvl1, 2nd=lvl2, etc.) */
 const SEEDS_UNLOCK_LEVELS: Record<string, number> = {
   seed_production: 1,
-  seed_quality: 2,
-  seed_storage: 3,
-  seed_surplus: 4,
-  bonus_seeds: 5,
+  seed_storage: 2,
+  seed_quality: 6,
+  seed_surplus: 10,
+  bonus_seeds: 13,
+};
+
+const CROPS_UNLOCK_LEVELS: Record<string, number> = {
+  harvest_speed: 1,
+  plot_expansion: 3,
+  crop_value: 7,
+  fertile_soil: 11,
+  merge_harvest: 14,
+};
+
+const HARVEST_UNLOCK_LEVELS: Record<string, number> = {
+  customer_speed: 1,
+  market_value: 4,
+  premium_orders: 8,
+  surplus_sales: 12,
+  happy_customer: 15,
+};
+
+/** Get level unlock info for level-up popup. Returns title, description, icon, and optionally upgradeId/tab for Unlock Now behavior. */
+export const getLevelUnlockInfo = (level: number): { title: string; description: string; icon: string; upgradeId?: string; tab?: TabType } => {
+  const allUnlocks: { level: number; upgradeId: string; tab: TabType; name: string; description: string; icon: string; popupDescription?: string }[] = [
+    { level: 2, upgradeId: 'seed_storage', tab: 'SEEDS', name: 'Storage Capacity', description: 'Increase the amount of seeds you can store', icon: 'icon_seedstorage.png' },
+    { level: 3, upgradeId: 'plot_expansion', tab: 'CROPS', name: 'Garden Expansion', description: 'Unlock additional plots in the garden', icon: 'icon_plotexpansion.png' },
+    { level: 4, upgradeId: 'market_value', tab: 'HARVEST', name: 'Market Value', description: 'Increase the coins earned when completing orders', icon: 'icon_marketvalue.png' },
+    { level: 5, upgradeId: '', tab: 'HARVEST', name: 'Extra Orders', description: 'You can now hold +1 extra order at a time', icon: 'icon_extracustomer.png' },
+    { level: 6, upgradeId: 'seed_quality', tab: 'SEEDS', name: 'Seed Quality', description: 'Increase the chance to produce higher level plants', icon: 'icon_seedquality.png' },
+    { level: 7, upgradeId: 'crop_value', tab: 'CROPS', name: 'Crop Yield', description: 'harvest more crops from each plant', icon: 'icon_cropvalue.png', popupDescription: 'You can now increase the number of crops harvested from each plant' },
+    { level: 8, upgradeId: 'premium_orders', tab: 'HARVEST', name: 'Premium Orders', description: 'More likely to get orders for crops above your current level', icon: 'icon_premiumorders.png', popupDescription: 'You can now upgrade orders to request higher-level crops' },
+    { level: 9, upgradeId: '', tab: 'HARVEST', name: 'Extra Orders', description: 'You can now hold +1 extra order at a time', icon: 'icon_extracustomer.png' },
+    { level: 10, upgradeId: 'seed_surplus', tab: 'SEEDS', name: 'Surplus Seeds', description: 'Extra seeds become coins when storage is full', icon: 'icon_seedsurplus.png', popupDescription: 'Extra seeds will now become coins when your storage is full' },
+    { level: 11, upgradeId: 'fertile_soil', tab: 'CROPS', name: 'Fertile Soil', description: 'Fertile plots yield double crops when harvested', icon: 'icon_fetilesoil.png', popupDescription: 'You can now create fertile soil to yield double crops when harvested' },
+    { level: 12, upgradeId: 'surplus_sales', tab: 'HARVEST', name: 'Surplus Sales', description: 'Increase the coins earned from surplus plants', icon: 'icon_surplussales.png', popupDescription: 'Plants without matching orders can now be harvested for coins' },
+    { level: 13, upgradeId: 'bonus_seeds', tab: 'SEEDS', name: 'Lucky Seed', description: 'Increase the chance for seeds to grow an extra plant', icon: 'icon_luckyseed.png' },
+    { level: 14, upgradeId: 'merge_harvest', tab: 'CROPS', name: 'Chain Harvest', description: 'Increase chance for merges to harvest nearby plants', icon: 'icon_mergeharvest.png', popupDescription: 'Merging now has a chance to instantly harvest nearby plants' },
+    { level: 15, upgradeId: 'happy_customer', tab: 'HARVEST', name: 'Happy Customer', description: 'Increase chance that customers pay double for orders', icon: 'icon_happycustomer.png', popupDescription: 'You can now increase the chance for customers to pay double coins for orders' },
+  ];
+  const match = allUnlocks.find(u => u.level === level);
+  if (match) {
+    const desc = match.popupDescription
+      ?? (match.upgradeId ? `You can now ${match.description.toLowerCase()}` : match.description);
+    return {
+      title: match.name,
+      description: desc,
+      icon: assetPath(`/assets/icons/${match.icon}`),
+      upgradeId: match.upgradeId || undefined,
+      tab: match.upgradeId ? match.tab : match.tab,
+    };
+  }
+  return { title: `Level ${level}`, description: "You've reached a new level!", icon: assetPath('/assets/icons/icon_level.png'), upgradeId: undefined, tab: undefined };
 };
 
 const ICON_LOCK = assetPath('/assets/icons/icon_lock.png');
@@ -406,7 +458,7 @@ export const createInitialHarvestState = (): Record<string, UpgradeState> => ({
   happy_customer: { level: 0, progress: 0 },
 });
 
-export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange, money, setMoney, seedsState: propsSeedsState, setSeedsState: propsSetSeedsState, harvestState: propsHarvestState, setHarvestState: propsSetHarvestState, cropsState: propsCropsState, setCropsState: propsSetCropsState, lockedCellCount = 0, onUnlockCell, fertilizableCellCount = 0, onFertilizeCell, highestPlantEver = 1, rewardedOffers = [], onRewardedOfferClick, playerLevel = 1 }) => {
+export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange, money, setMoney, seedsState: propsSeedsState, setSeedsState: propsSetSeedsState, harvestState: propsHarvestState, setHarvestState: propsSetHarvestState, cropsState: propsCropsState, setCropsState: propsSetCropsState, lockedCellCount = 0, onUnlockCell, fertilizableCellCount = 0, onFertilizeCell, highestPlantEver = 1, rewardedOffers = [], onRewardedOfferClick, playerLevel = 1, pendingUnlockUpgradeId = null, isExpanded = false }) => {
   const [internalSeedsState, setInternalSeedsState] = useState<Record<string, UpgradeState>>(createInitialSeedsState);
   const seedsState = propsSeedsState ?? internalSeedsState;
   const setSeedsState = propsSetSeedsState ?? setInternalSeedsState;
@@ -418,6 +470,9 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
   const setHarvestState = propsSetHarvestState ?? setInternalHarvestState;
   const [flashingIds, setFlashingIds] = useState<Set<string>>(new Set());
   const [pressedId, setPressedId] = useState<string | null>(null);
+  const [unlockFlashIds, setUnlockFlashIds] = useState<Set<string>>(new Set());
+  const [completedUnlockFlashIds, setCompletedUnlockFlashIds] = useState<Set<string>>(new Set());
+  const upgradeRowRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const scrollRefs = {
     SEEDS: useRef<HTMLDivElement>(null),
@@ -437,6 +492,78 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
     const el = (scrollRefs as any)[activeTab].current;
     if (el) el.scrollTo({ top: 0, behavior: 'auto' });
   }, [activeTab]);
+
+  useEffect(() => {
+    if (pendingUnlockUpgradeId) {
+      setCompletedUnlockFlashIds(prev => { const n = new Set(prev); n.delete(pendingUnlockUpgradeId!); return n; });
+    } else {
+      setCompletedUnlockFlashIds(new Set());
+    }
+  }, [pendingUnlockUpgradeId]);
+
+  useEffect(() => {
+    if (!pendingUnlockUpgradeId) return;
+
+    const TAB_SLIDE_MS = 700;
+    const SCROLL_DURATION_MS = 800;
+    const FLASH_DURATION_MS = 600;
+    let scrollRafId: number | null = null;
+
+    const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+
+    const scrollT = setTimeout(() => {
+      const el = upgradeRowRefs.current[pendingUnlockUpgradeId];
+      const scrollContainer = (scrollRefs as Record<string, React.RefObject<HTMLDivElement | null>>)[activeTab]?.current;
+      if (el && scrollContainer) {
+        const containerRect = scrollContainer.getBoundingClientRect();
+        const elRect = el.getBoundingClientRect();
+        const offsetTop = elRect.top - containerRect.top + scrollContainer.scrollTop;
+        const elHeight = elRect.height;
+        const containerHeight = scrollContainer.clientHeight;
+        const maxScroll = scrollContainer.scrollHeight - containerHeight;
+        // Center the upgrade in the viewport so it's fully visible (was scrolling past and cutting off top)
+        const centerTarget = offsetTop - (containerHeight / 2) + (elHeight / 2);
+        const scrollTarget = Math.max(0, Math.min(maxScroll, centerTarget));
+        const startTop = scrollContainer.scrollTop;
+        const distance = scrollTarget - startTop;
+        const startTime = Date.now();
+
+        const animate = () => {
+          const elapsed = Date.now() - startTime;
+          const progress = Math.min(1, elapsed / SCROLL_DURATION_MS);
+          const eased = easeOutCubic(progress);
+          scrollContainer.scrollTop = startTop + distance * eased;
+          if (progress < 1) {
+            scrollRafId = requestAnimationFrame(animate);
+          } else {
+            setUnlockFlashIds(prev => new Set(prev).add(pendingUnlockUpgradeId));
+          }
+        };
+        if (Math.abs(distance) > 2) {
+          scrollRafId = requestAnimationFrame(animate);
+        } else {
+          setUnlockFlashIds(prev => new Set(prev).add(pendingUnlockUpgradeId));
+        }
+      } else {
+        setUnlockFlashIds(prev => new Set(prev).add(pendingUnlockUpgradeId));
+      }
+    }, TAB_SLIDE_MS);
+
+    const clearT = setTimeout(() => {
+      setUnlockFlashIds(prev => {
+        const next = new Set(prev);
+        next.delete(pendingUnlockUpgradeId);
+        return next;
+      });
+      setCompletedUnlockFlashIds(prev => new Set(prev).add(pendingUnlockUpgradeId));
+    }, TAB_SLIDE_MS + SCROLL_DURATION_MS + FLASH_DURATION_MS);
+
+    return () => {
+      clearTimeout(scrollT);
+      clearTimeout(clearT);
+      if (scrollRafId) cancelAnimationFrame(scrollRafId);
+    };
+  }, [pendingUnlockUpgradeId, activeTab]);
 
   useEffect(() => {
     const cleanups: (() => void)[] = [];
@@ -704,11 +831,17 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
         const currentCostDisplay = getUpgradeCost(upgrade.id, state.level);
         const canAfford = money >= currentCost;
         const isFlashing = flashingIds.has(upgrade.id);
+        const isUnlockFlashing = unlockFlashIds.has(upgrade.id);
         const isPressed = pressedId === upgrade.id;
 
-        // Seeds tab: check if upgrade is locked by player level (unlocks only when "Unlock Now" tapped on level-up popup)
-        const seedsUnlockLevel = category === 'SEEDS' ? (SEEDS_UNLOCK_LEVELS[upgrade.id] ?? 1) : null;
-        const isLocked = seedsUnlockLevel != null && playerLevel < seedsUnlockLevel;
+        // Check if upgrade is locked by player level (unlocks only when "Unlock Now" tapped on level-up popup)
+        const unlockLevel =
+          category === 'SEEDS' ? (SEEDS_UNLOCK_LEVELS[upgrade.id] ?? 1) :
+          category === 'CROPS' ? (CROPS_UNLOCK_LEVELS[upgrade.id] ?? 1) :
+          category === 'HARVEST' ? (HARVEST_UNLOCK_LEVELS[upgrade.id] ?? 1) : 1;
+        // Keep showing locked until flash fades out (button switches to green when blue fade-out starts)
+        const isPendingUntilFadeOut = pendingUnlockUpgradeId === upgrade.id && !completedUnlockFlashIds.has(upgrade.id);
+        const isLocked = playerLevel < unlockLevel || isPendingUntilFadeOut;
         
         // Check if this upgrade is maxed
         const isMaxed = 
@@ -758,14 +891,19 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
           ? getPremiumOrdersMinLevel(stateMap as HarvestState)
           : null;
 
+        const UNLOCK_FLASH_BLUE = '#89c8e1';
         return (
           <div 
-            key={upgrade.id} 
+            key={upgrade.id}
+            ref={(el) => { upgradeRowRefs.current[upgrade.id] = el; }}
             className={`relative flex flex-col transition-all duration-300 border-2 ${
-              isFlashing 
-                ? 'bg-[#a7c957] scale-[1.01] shadow-lg z-10 border-[#c2b180] rounded-[11px]' 
-                : 'bg-[#fcf0c6] shadow-[0_2px_10px_rgba(0,0,0,0.03)] border-[#ebdbaf] rounded-[11px]'
+              isUnlockFlashing
+                ? 'scale-[1.02] shadow-lg z-10 border-[#66a4c6] rounded-[11px]'
+                : isFlashing 
+                  ? 'bg-[#a7c957] scale-[1.01] shadow-lg z-10 border-[#c2b180] rounded-[11px]' 
+                  : 'bg-[#fcf0c6] shadow-[0_2px_10px_rgba(0,0,0,0.03)] border-[#ebdbaf] rounded-[11px]'
             }`}
+            style={isUnlockFlashing ? { backgroundColor: UNLOCK_FLASH_BLUE } : undefined}
           >
             <div className="flex items-center p-1.5 px-3">
               {/* Square Icon Box */}
@@ -781,7 +919,10 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
               <div className="flex-grow px-3">
                 <div className="flex items-baseline space-x-1.5">
                   {/* Updated title font size to 13px (from 14px) as requested */}
-                  <h3 className={`text-[13px] font-black tracking-tight uppercase leading-none ${isFlashing ? 'text-[#386641]' : 'text-[#583c1f]'}`}>
+                  <h3
+                    className="text-[13px] font-black tracking-tight uppercase leading-none"
+                    style={{ color: isUnlockFlashing ? '#507493' : isFlashing ? '#386641' : '#583c1f' }}
+                  >
                     {upgrade.name}
                   </h3>
                   {/* Current value (Seeds/Harvest: formatted value in green; others: LV) */}
@@ -796,7 +937,10 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
                   )}
                 </div>
                 {/* Description - seed_quality has dynamic description, others use static or generic yield */}
-                <div className={`text-[11px] font-semibold mt-0.5 tracking-tight ${(upgrade.description || upgrade.id === 'seed_quality' || upgrade.id === 'premium_orders') ? '' : 'uppercase'} ${isFlashing ? 'text-[#386641]/50' : ''}`} style={{ color: isFlashing ? undefined : descTextColor }}>
+                <div
+                  className={`text-[11px] font-semibold mt-0.5 tracking-tight ${(upgrade.description || upgrade.id === 'seed_quality' || upgrade.id === 'premium_orders') ? '' : 'uppercase'} ${isFlashing && !isUnlockFlashing ? 'text-[#386641]/50' : ''}`}
+                  style={{ color: isUnlockFlashing ? '#7497b0' : isFlashing ? undefined : descTextColor }}
+                >
                   {upgrade.id === 'seed_quality' ? (
                     <>
                       Increase the chance to produce level <span style={{ color: SEEDS_VALUE_GREEN, fontWeight: 700 }}>{seedQualityTargetTier}</span> plants
@@ -848,12 +992,12 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
                       }}
                     />
                     <span className="text-[13px] font-black tracking-tighter" style={{ color: LOCKED_FONT }}>
-                      lvl {seedsUnlockLevel}
+                      lvl {unlockLevel}
                     </span>
                   </span>
                 ) : (
                   <span 
-                    className="text-[13px] font-black tracking-tighter transition-colors"
+                    className="text-[13px] font-black tracking-tighter"
                     style={{ 
                       color: isPressed ? buttonActiveFontColor : (isMaxed || !canAfford ? buttonDisabledFontColor : buttonFontColor)
                     }}
@@ -868,14 +1012,13 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
             <div className="flex w-full h-[10px] px-3 pb-2">
               <div className="w-full h-[6px] bg-[#9d8a57]/20 rounded-full overflow-hidden relative" style={{ minHeight: '6px' }}>
                 <div 
-                  className={`absolute left-0 top-0 h-full ${
-                    isFlashing ? 'bg-[#386641]' : 'bg-[#a7c957]'
-                  }`}
-                  style={{ 
+                  className="absolute left-0 top-0 h-full"
+                  style={{
+                    backgroundColor: isUnlockFlashing ? '#507493' : isFlashing ? '#386641' : '#a7c957',
                     width: `${progressPercent}%`,
                     transition: (progressPercent === 0 && !isFlashing) 
                       ? 'none' 
-                      : 'width 0.25s cubic-bezier(0.25, 1, 0.5, 1), background-color 0.3s ease'
+                      : 'width 0.25s cubic-bezier(0.25, 1, 0.5, 1), background-color 0.3s ease',
                   }}
                 />
               </div>
@@ -891,7 +1034,14 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
   const translateX = `calc(-${getTabIndex() * (100 / 3)}% + ${dragOffset}px)`;
   return (
     <div className="flex-1 min-h-0 relative overflow-hidden flex flex-col">
-      <div className={`tab-content-container h-full min-h-0 flex flex-1 ${isHorizontalDragging ? 'transition-none' : 'transition-transform duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]'}`} style={{ transform: `translateX(${translateX})` }}>
+      <div 
+        className={`tab-content-container h-full min-h-0 flex flex-1 ${isHorizontalDragging ? 'transition-none' : 'transition-transform'}`} 
+        style={{ 
+          transform: `translateX(${translateX})`,
+          transitionDuration: isExpanded ? '700ms' : '250ms',
+          transitionTimingFunction: isExpanded ? 'cubic-bezier(0.05, 0, 0, 1)' : 'cubic-bezier(0.22, 0, 0.12, 1)',
+        }}
+      >
         <div className="tab-pane h-full min-h-0 flex flex-col">{renderUpgradeItems('SEEDS', seedsState)}</div>
         <div className="tab-pane h-full min-h-0 flex flex-col">{renderUpgradeItems('CROPS', cropsState)}</div>
         <div className="tab-pane h-full min-h-0 flex flex-col">{renderUpgradeItems('HARVEST', harvestState)}</div>

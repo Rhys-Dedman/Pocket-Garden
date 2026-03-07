@@ -3,7 +3,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { HexBoard } from './components/HexBoard';
 import { UpgradeTabs } from './components/UpgradeTabs';
-import { UpgradeList, createInitialSeedsState, createInitialHarvestState, createInitialCropsState, getSeedQualityPercent, getSeedBaseTier, getBonusSeedChance, getSeedSurplusValue, getCropYieldPerHarvest, getHarvestSpeedLevel, getMergeHarvestChance, getGoalLoadingSeconds, getMarketValueMultiplier, getPremiumOrdersMinLevel, getSurplusSalesMultiplier, getHappyCustomerChance, HarvestState, UpgradeState, RewardedOffer } from './components/UpgradeList';
+import { UpgradeList, createInitialSeedsState, createInitialHarvestState, createInitialCropsState, getSeedQualityPercent, getSeedBaseTier, getBonusSeedChance, getSeedSurplusValue, getCropYieldPerHarvest, getHarvestSpeedLevel, getMergeHarvestChance, getGoalLoadingSeconds, getMarketValueMultiplier, getPremiumOrdersMinLevel, getSurplusSalesMultiplier, getHappyCustomerChance, HarvestState, UpgradeState, RewardedOffer, getLevelUnlockInfo } from './components/UpgradeList';
 import { Navbar } from './components/Navbar';
 import { StoreScreen } from './components/StoreScreen';
 import { SideAction } from './components/SideAction';
@@ -33,6 +33,10 @@ export function getCoinValueForLevel(level: number): number {
   return 5 * Math.pow(2, level - 1);
 }
 
+/** Max goal slots: 3 until level 5, then 4 until level 7, then 5 */
+const getMaxGoalSlots = (playerLevel: number): number =>
+  playerLevel >= 9 ? 5 : playerLevel >= 5 ? 4 : 3;
+
 /** Goals required to level up. Start at 3 for level 1→2; each level = round(previous × 1.25) */
 const getGoalsRequiredForLevel = (level: number): number => {
   if (level <= 1) return 3;
@@ -60,6 +64,46 @@ const getGoalCropRequired = (
   return Math.max(5, scaledGoal);
 };
 import { ErrorBoundary } from './components/ErrorBoundary';
+
+/** Ease-out for opening: easeOutQuint over first 50% (fast start, slow end), then hold */
+const easeOutOpen = (t: number) => (t < 0.5 ? 1 - Math.pow(1 - t * 2, 5) : 1);
+/** Ease-out for closing */
+const easeOutClose = (t: number) => 1 - Math.pow(1 - t, 3);
+
+/** Animate height with JS for reliable easing (CSS transitions weren't applying curve on open) */
+function useAnimatedPanelHeight(isExpanded: boolean) {
+  const [height, setHeight] = useState(isExpanded ? 279 : 50);
+  const heightRef = useRef(height);
+  heightRef.current = height;
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const target = isExpanded ? 279 : 50;
+    const from = heightRef.current;
+    if (Math.abs(from - target) < 1) return;
+
+    const startTime = Date.now();
+    const duration = isExpanded ? 1400 : 350;
+    const ease = isExpanded ? easeOutOpen : easeOutClose;
+
+    const tick = () => {
+      const elapsed = Date.now() - startTime;
+      const t = Math.min(1, elapsed / duration);
+      const eased = ease(t);
+      const next = from + (target - from) * eased;
+      setHeight(t >= 1 ? target : next);
+      if (t < 1) {
+        rafRef.current = requestAnimationFrame(tick);
+      }
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [isExpanded]);
+
+  return height;
+}
 
 // Preload popup assets on module load to prevent flash of unstyled content
 const POPUP_ASSETS_TO_PRELOAD = [
@@ -151,6 +195,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>('SEEDS');
   const [activeScreen, setActiveScreen] = useState<ScreenType>('FARM');
   const [isExpanded, setIsExpanded] = useState(false);
+  const panelHeight = useAnimatedPanelHeight(isExpanded);
   const [money, setMoney] = useState(0);
 
   const [grid, setGrid] = useState<BoardCell[]>(generateInitialGrid());
@@ -181,21 +226,21 @@ export default function App() {
   // Barn notification state - shows when a new plant is added to barn
   const [barnNotification, setBarnNotification] = useState(false);
   const [unlockingCellIndices, setUnlockingCellIndices] = useState<number[]>([]); // Cells currently playing unlock animation
-  // Goals: slot 1-5, each is 'empty' | 'loading' | 'green' | 'completed'. Only 1 loading at a time.
-  const [goalSlots, setGoalSlots] = useState<('empty' | 'loading' | 'green' | 'completed')[]>(['green', 'green', 'green', 'green', 'green']);
-  const [goalPlantTypes, setGoalPlantTypes] = useState<number[]>([1, 2, 3, 4, 5]); // plant level 1-5 per slot when green
+  // Goals: start with 3 slots; unlock 4th at level 5, 5th at level 9
+  const [goalSlots, setGoalSlots] = useState<('empty' | 'loading' | 'green' | 'completed')[]>(['green', 'green', 'green', 'empty', 'empty']);
+  const [goalPlantTypes, setGoalPlantTypes] = useState<number[]>([1, 2, 3, 0, 0]); // plant level 1-5 per slot when green
   const [goalLoadingSeconds, setGoalLoadingSeconds] = useState(30); // countdown 30->0 (Order Speed)
   const [goalTransitionSlot, setGoalTransitionSlot] = useState<number | null>(null); // slot transitioning loading->green (for fade)
   const [goalTransitionFade, setGoalTransitionFade] = useState(false); // triggers fade: loading out, green in
   const [goalSlotFadeInSlot, setGoalSlotFadeInSlot] = useState<number | null>(null); // slot fading in 0→100% over 500ms; countdown waits until done
-  const [goalCounts, setGoalCounts] = useState<number[]>([5, 5, 5, 5, 5]); // remaining count per slot when green (e.g. 5→4→3)
-  const [goalAmountsRequired, setGoalAmountsRequired] = useState<number[]>([5, 5, 5, 5, 5]); // crops required when goal was created (for reward calc)
+  const [goalCounts, setGoalCounts] = useState<number[]>([5, 5, 5, 0, 0]); // remaining count per slot when green (e.g. 5→4→3)
+  const [goalAmountsRequired, setGoalAmountsRequired] = useState<number[]>([5, 5, 5, 0, 0]); // crops required when goal was created (for reward calc)
   const [goalCompletedValues, setGoalCompletedValues] = useState<number[]>([0, 0, 0, 0, 0]); // coin value when completed (plantValue × amountRequired × 2)
   const [goalImpactSlots, setGoalImpactSlots] = useState<number[]>([]); // slots currently playing impact (white flash + icon scale)
   const [goalBounceSlots, setGoalBounceSlots] = useState<number[]>([]); // slots currently bouncing (panel down)
   const [goalSlidingUpSlots, setGoalSlidingUpSlots] = useState<Set<number>>(new Set()); // slots currently playing slide-up animation
   const [goalCompactionStagger, setGoalCompactionStagger] = useState<{ completedSlotIdx: number; completedPosition: number; oldDisplayIndices: number[]; isOverlapping?: boolean } | null>(null);
-  const [goalDisplayOrder, setGoalDisplayOrder] = useState<number[]>([0, 1, 2, 3, 4]); // Fixed left-to-right order; never reshuffle by plant type
+  const [goalDisplayOrder, setGoalDisplayOrder] = useState<number[]>([0, 1, 2]); // Fixed left-to-right order; never reshuffle by plant type
   const [activeGoalCoinParticles, setActiveGoalCoinParticles] = useState<GoalCoinParticleData[]>([]);
   const goalIconRef0 = useRef<HTMLImageElement>(null);
   const goalIconRef1 = useRef<HTMLImageElement>(null);
@@ -237,6 +282,7 @@ export default function App() {
   const [playerLevelProgress, setPlayerLevelProgress] = useState(0); // 0-5, 5 goals to level up
   const [playerLevelFlashTrigger, setPlayerLevelFlashTrigger] = useState(0);
   const [levelUpPopup, setLevelUpPopup] = useState<{ isVisible: boolean; level: number } | null>(null);
+  const [pendingUnlockUpgradeId, setPendingUnlockUpgradeId] = useState<string | null>(null);
   const nextWalletBurstIdRef = useRef(0);
   const nextGoalCoinBurstIdRef = useRef(0);
   const levelUpGuardRef = useRef(false);
@@ -331,7 +377,7 @@ export default function App() {
     return () => ro.disconnect();
   }, [updateSpriteCenter]);
 
-  // When panel opens/closes, drive sprite position every frame for 500ms to match upgrade panel transition
+  // When panel opens/closes, drive sprite position every frame (1400ms for open, 700ms for close)
   useEffect(() => {
     let rafId: number;
     let endAt = 0;
@@ -341,7 +387,7 @@ export default function App() {
         rafId = requestAnimationFrame(tick);
       }
     };
-    endAt = Date.now() + 500;
+    endAt = Date.now() + (isExpanded ? 1400 : 350);
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
   }, [isExpanded, updateSpriteCenter]);
@@ -589,7 +635,8 @@ export default function App() {
       setGoalAmountsRequired((a) => { const next = [...a]; next[loadingIdx] = goalRequired; return next; });
       requestAnimationFrame(() => requestAnimationFrame(() => setGoalTransitionFade(true)));
       setTimeout(() => {
-        const firstEmptyIdx = goalSlots.findIndex((s) => s === 'empty');
+        const maxSlots = getMaxGoalSlots(playerLevel);
+        const firstEmptyIdx = goalSlots.findIndex((s, i) => s === 'empty' && i < maxSlots);
         setGoalBounceSlots((prev) => prev.filter((s) => s !== loadingIdx));
         setGoalSlots((slots) => {
           const next = [...slots];
@@ -634,7 +681,8 @@ export default function App() {
           setGoalAmountsRequired((a) => { const next = [...a]; next[loadingIdx] = goalRequired; return next; });
           requestAnimationFrame(() => requestAnimationFrame(() => setGoalTransitionFade(true)));
           setTimeout(() => {
-            const firstEmptyIdx = goalSlots.findIndex((s) => s === 'empty');
+            const maxSlots = getMaxGoalSlots(playerLevel);
+            const firstEmptyIdx = goalSlots.findIndex((s, i) => s === 'empty' && i < maxSlots);
             setGoalBounceSlots((prev) => prev.filter((s) => s !== loadingIdx));
             setGoalSlots((slots) => {
               const next = [...slots];
@@ -663,6 +711,24 @@ export default function App() {
       }
     };
   }, [isLoading, goalSlots, goalSlotFadeInSlot, harvestState, playerLevel, cropsState]);
+
+  // When player levels up and unlocks a new goal slot, start loading in that slot if empty and no other loading
+  useEffect(() => {
+    if (isLoading) return;
+    const maxSlots = getMaxGoalSlots(playerLevel);
+    const hasLoading = goalSlots.some((s) => s === 'loading');
+    if (hasLoading) return;
+    for (let i = 3; i < maxSlots; i++) {
+      if (goalSlots[i] === 'empty') {
+        setGoalSlots((s) => { const n = [...s]; n[i] = 'loading'; return n; });
+        setGoalDisplayOrder((prev) => (prev.includes(i) ? prev : [...prev, i]));
+        setGoalSlotFadeInSlot(i);
+        setGoalLoadingSeconds(getGoalLoadingSeconds(harvestState));
+        setTimeout(() => setGoalSlotFadeInSlot(null), 500);
+        break;
+      }
+    }
+  }, [playerLevel, isLoading, goalSlots, harvestState]);
 
   /**
    * At 100% seed progress: add one seed to storage (if room), reset to 0% immediately.
@@ -1131,14 +1197,16 @@ export default function App() {
       };
 
       const surplusMultiplier = getSurplusSalesMultiplier(harvestState);
+      const surplusSalesUnlocked = playerLevel >= 12;
       grid.forEach((cell, cellIdx) => {
         if (!cell.item) return;
-        harvestCellIndices.push(cellIdx);
         const level = cell.item.level;
         const slotIdx = level >= 1 && level <= 5
           ? goalPlantTypes.findIndex((pt, i) => pt === level && goalSlots[i] === 'green' && goalCounts[i] > 0)
           : -1;
         const hasGoalForPlant = slotIdx >= 0;
+        if (!hasGoalForPlant && !surplusSalesUnlocked) return;
+        harvestCellIndices.push(cellIdx);
 
         const hexEl = document.getElementById(`hex-${cellIdx}`);
         if (!hexEl) return;
@@ -1237,7 +1305,7 @@ export default function App() {
         }
       }, delayMs);
     }
-  }, [grid, cropsState, goalSlots, goalCounts, goalPlantTypes, harvestState]);
+  }, [grid, cropsState, goalSlots, goalCounts, goalPlantTypes, harvestState, playerLevel]);
 
   // Perform merge harvest: roll chance per adjacent cell to harvest (spawn coin or plant panel) without removing plant
   const performMergeHarvest = useCallback((centerCellIdx: number, chancePercent: number, excludeCellIdx?: number) => {
@@ -1265,6 +1333,7 @@ export default function App() {
     const plantPanelsWithDist: { panel: PlantPanelData; dist: number }[] = [];
     const cropYieldPerHarvest = getCropYieldPerHarvest(cropsState);
     const surplusMultiplier = getSurplusSalesMultiplier(harvestState);
+    const surplusSalesUnlocked = playerLevel >= 12;
 
     const getGoalIconCenter = (slotIdx: number): { x: number; y: number } | null => {
       const iconEl = goalIconRefs[slotIdx]?.current;
@@ -1285,6 +1354,7 @@ export default function App() {
         ? goalPlantTypes.findIndex((pt, i) => pt === level && goalSlots[i] === 'green' && goalCounts[i] > 0)
         : -1;
       const hasGoalForPlant = slotIdx >= 0;
+      if (!hasGoalForPlant && !surplusSalesUnlocked) return;
 
       const hexEl = document.getElementById(`hex-${cellIdx}`);
       if (!hexEl) return;
@@ -1389,7 +1459,7 @@ export default function App() {
 
     setHarvestBounceCellIndices(triggeredCells);
     setTimeout(() => setHarvestBounceCellIndices([]), 250);
-  }, [grid, cropsState, goalSlots, goalCounts, goalPlantTypes, harvestState]);
+  }, [grid, cropsState, goalSlots, goalCounts, goalPlantTypes, harvestState, playerLevel]);
 
   /**
    * At 100% harvest progress: perform harvest (spawn coin panels, leaf bursts), flash white, reset to 0%.
@@ -1542,7 +1612,7 @@ export default function App() {
                 className="absolute inset-0 pointer-events-none z-0"
                 style={{ background: '#3d8f38' }}
               />
-              {/* 2. Background sprite: primary, on top of bleed; center pinned to hex grid; transition matches upgrade panel (500ms, cubic-bezier) */}
+              {/* 2. Background sprite: primary, on top of bleed; center pinned to hex grid; transition matches upgrade panel (700ms, cubic-bezier) */}
               <div className="absolute inset-0 pointer-events-none overflow-hidden z-[5]">
                 <img
                   src={assetPath('/assets/background/background_grass.png')}
@@ -1592,6 +1662,29 @@ export default function App() {
                   playerLevelProgress={playerLevelProgress}
                   playerLevelFlashTrigger={playerLevelFlashTrigger}
                   playerLevelGoalsRequired={getGoalsRequiredForLevel(playerLevel)}
+                  onXpBoostClick={() => {
+                    setPlayerLevelProgress((prev) => {
+                      const next = prev + 1;
+                      const goalsRequired = getGoalsRequiredForLevel(playerLevel);
+                      if (next >= goalsRequired) {
+                        if (!levelUpGuardRef.current) {
+                          levelUpGuardRef.current = true;
+                          const nextLevel = playerLevel + 1;
+                          if (nextLevel <= 15) {
+                            setLevelUpPopup({ isVisible: true, level: nextLevel });
+                          } else {
+                            setPlayerLevel((l) => l + 1);
+                            setTimeout(() => { levelUpGuardRef.current = false; }, 0);
+                            return 0;
+                          }
+                          setTimeout(() => { levelUpGuardRef.current = false; }, 0);
+                        }
+                        return goalsRequired;
+                      }
+                      return next;
+                    });
+                    setPlayerLevelFlashTrigger((t) => t + 1);
+                  }}
                   onGiftClick={() => setLimitedOfferPopup({
                     isVisible: true,
                     offerId: 'super_seed_offer',
@@ -1613,7 +1706,8 @@ export default function App() {
                   style={{ top: -55, height: 140, paddingTop: 55 }}
                 >
                 {[0, 1, 2, 3, 4].map((slotIdx) => {
-                  const visibleOrder = goalDisplayOrder.filter((i) => goalSlots[i] !== 'empty');
+                  const maxGoalSlots = getMaxGoalSlots(playerLevel);
+                  const visibleOrder = goalDisplayOrder.filter((i) => goalSlots[i] !== 'empty' && i < maxGoalSlots);
                   const goalDisplayIndex = visibleOrder.indexOf(slotIdx);
                   const state = goalSlots[slotIdx];
                   const isBouncing = goalBounceSlots.includes(slotIdx);
@@ -1649,7 +1743,14 @@ export default function App() {
                         if (next >= goalsRequired) {
                           if (!levelUpGuardRef.current) {
                             levelUpGuardRef.current = true;
-                            setLevelUpPopup({ isVisible: true, level: (playerLevel + 1) });
+                            const nextLevel = playerLevel + 1;
+                            if (nextLevel <= 15) {
+                              setLevelUpPopup({ isVisible: true, level: nextLevel });
+                            } else {
+                              setPlayerLevel((l) => l + 1);
+                              setTimeout(() => { levelUpGuardRef.current = false; }, 0);
+                              return 0;
+                            }
                             setTimeout(() => { levelUpGuardRef.current = false; }, 0);
                           }
                           return goalsRequired; // Stay at 100% until Unlock Now clicked
@@ -1691,11 +1792,12 @@ export default function App() {
 
                       setTimeout(() => {
                         setGoalCompactionStagger(null);
+                        const maxSlots = getMaxGoalSlots(playerLevel);
                         setGoalSlots((s) => {
                           const hasLoading = s.some((state) => state === 'loading');
                           if (hasLoading) return s;
                           const n = [...s];
-                          if (n[slotIdx] === 'empty') {
+                          if (n[slotIdx] === 'empty' && slotIdx < maxSlots) {
                             n[slotIdx] = 'loading';
                             setGoalDisplayOrder((prev) => (prev.includes(slotIdx) ? prev : [...prev, slotIdx]));
                             setGoalSlotFadeInSlot(slotIdx);
@@ -1766,10 +1868,17 @@ export default function App() {
                 {/* Only tapping this backdrop (background) closes the panel; hex cells and plants do not */}
                 <div
                   className="absolute inset-0 z-0 cursor-pointer"
+                  style={{ touchAction: 'manipulation' }}
                   onClick={() => setIsExpanded(false)}
                   aria-label="Close upgrade panel"
                 />
-                <div className="absolute bottom-4 w-full px-3 flex justify-between items-end z-20 pointer-events-none transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]">
+                <div 
+                  className="absolute bottom-4 w-full px-3 flex justify-between items-end z-20 pointer-events-none transition-all"
+                  style={{ 
+                    transitionDuration: isExpanded ? '1400ms' : '350ms',
+                    transitionTimingFunction: isExpanded ? 'cubic-bezier(0.05, 0, 0, 1)' : 'cubic-bezier(0.22, 0, 0.12, 1)',
+                  }}
+                >
                    <div className="pointer-events-auto flex items-center justify-center" ref={plantButtonRef} style={{ transform: 'scale(0.9)', transformOrigin: 'center center' }} onClick={(e) => e.stopPropagation()}>
 <SideAction
                         label="Plant"
@@ -1859,6 +1968,7 @@ export default function App() {
                           ? goalPlantTypes.findIndex((pt, i) => pt === mergeResultLevel && goalSlots[i] === 'green' && goalCounts[i] > 0)
                           : -1;
                         const hasGoalForPlant = slotIdx >= 0;
+                        const surplusSalesUnlocked = playerLevel >= 12;
                         const hexEl = document.getElementById(`hex-${cellIdx}`);
                         const panelHeightPx = 14;
                         const offsetUp = (panelHeightPx / 2 + 4) * 0.4;
@@ -1882,7 +1992,7 @@ export default function App() {
                               moveToTargetDelayMs: 0,
                             },
                           ]);
-                        } else {
+                        } else if (surplusSalesUnlocked) {
                           const baseValue = getCoinValueForLevel(mergeResultLevel);
                           const surplusMultiplier = getSurplusSalesMultiplier(harvestState);
                           const value = Math.floor(baseValue * surplusMultiplier);
@@ -1931,11 +2041,12 @@ export default function App() {
 
               <div 
                 onClick={(e) => e.stopPropagation()}
-                className="flex flex-col overflow-hidden relative z-30 flex-shrink-0 shadow-[0_-15px_50px_rgba(0,0,0,0.15)] rounded-t-[32px] transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"
+                className="flex flex-col overflow-hidden relative z-30 flex-shrink-0 shadow-[0_-15px_50px_rgba(0,0,0,0.15)] rounded-t-[32px]"
                 style={{
-                  flex: isExpanded ? '0 0 279px' : '0 0 50px',
+                  height: panelHeight,
                   background: '#fcf0c6',
-                  borderTop: '1px solid #ebdbaf'
+                  borderTop: '1px solid #ebdbaf',
+                  touchAction: 'manipulation',
                 }}
               >
                 <UpgradeTabs 
@@ -1943,6 +2054,7 @@ export default function App() {
                   activeTab={activeTab} 
                   onTabChange={handleTabChange}
                   tabsWithOffers={tabsWithOffers}
+                  isExpanded={isExpanded}
                 />
                 <div className="flex-grow min-h-0 overflow-hidden relative flex flex-col">
                   <UpgradeList 
@@ -1963,6 +2075,8 @@ export default function App() {
                     highestPlantEver={highestPlantEver}
                     rewardedOffers={rewardedOffers}
                     playerLevel={playerLevel}
+                    pendingUnlockUpgradeId={pendingUnlockUpgradeId}
+                    isExpanded={isExpanded}
                     onRewardedOfferClick={(offerId) => {
                       // Find the offer and show the popup
                       const offer = rewardedOffers.find(o => o.id === offerId);
@@ -2214,18 +2328,44 @@ export default function App() {
         {createPortal(
           <div className="fixed inset-0 pointer-events-none" style={{ zIndex: 100 }}>
             {/* Level Up Popup */}
-            {levelUpPopup && (
-              <LevelUpPopup
-                isVisible={levelUpPopup.isVisible}
-                onClose={() => setLevelUpPopup(null)}
-                level={levelUpPopup.level}
-                onUnlockNow={() => {
-                  setPlayerLevel((l) => l + 1);
-                  setPlayerLevelProgress(0);
-                }}
-                appScale={appScale}
-              />
-            )}
+            {levelUpPopup && (() => {
+              const unlockInfo = getLevelUnlockInfo(levelUpPopup.level);
+              return (
+                <LevelUpPopup
+                  isVisible={levelUpPopup.isVisible}
+                  onClose={() => setLevelUpPopup(null)}
+                  level={levelUpPopup.level}
+                  title={unlockInfo.title}
+                  description={unlockInfo.description}
+                  icon={unlockInfo.icon}
+                  onUnlockNow={() => {
+                    setPlayerLevel((l) => l + 1);
+                    setPlayerLevelProgress(0);
+                    if (unlockInfo.upgradeId === 'seed_surplus') {
+                      setSeedsState((prev) => ({
+                        ...prev,
+                        seed_surplus: { level: 1, progress: 0 },
+                      }));
+                    }
+                    if (unlockInfo.upgradeId === 'merge_harvest') {
+                      setCropsState((prev) => ({
+                        ...prev,
+                        merge_harvest: { level: 1, progress: 0 },
+                      }));
+                    }
+                    if (unlockInfo.tab) {
+                      setIsExpanded(true);
+                      setActiveTab(unlockInfo.tab);
+                      if (unlockInfo.upgradeId) {
+                        setPendingUnlockUpgradeId(unlockInfo.upgradeId);
+                        setTimeout(() => setPendingUnlockUpgradeId(null), 2500);
+                      }
+                    }
+                  }}
+                  appScale={appScale}
+                />
+              );
+            })()}
 
             {/* Discovery Popup */}
             {discoveryPopup && (

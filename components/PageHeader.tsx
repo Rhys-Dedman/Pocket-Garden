@@ -25,6 +25,8 @@ interface PageHeaderProps {
   playerLevelFlashTrigger?: number;
   /** If true, hide the top bar background (e.g. for shed screen - keeps plant wallet + settings only) */
   hideTopBarBg?: boolean;
+  /** When provided, shows a + button that grants 1 goal worth of XP on tap */
+  onXpBoostClick?: () => void;
 }
 
 const formatMoney = (amount: number): string => {
@@ -47,6 +49,7 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   playerLevelFlashTrigger = 0,
   playerLevelGoalsRequired = 2,
   hideTopBarBg = false,
+  onXpBoostClick,
 }) => {
   const isInteractive = !!walletRef;
   const prevBurstRef = useRef(walletBurstCount);
@@ -212,6 +215,21 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
                 </div>
               </div>
             </div>
+            {/* XP Boost + button - to the right of player level */}
+            {onXpBoostClick && (
+              <button
+                onClick={onXpBoostClick}
+                className="flex-shrink-0 w-[22px] h-[22px] flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all"
+                style={{
+                  backgroundColor: '#775041',
+                  borderWidth: 1,
+                  borderColor: '#e9dcaf',
+                }}
+                aria-label="Add XP"
+              >
+                <span className="text-white font-bold leading-none" style={{ fontSize: 16 }}>+</span>
+              </button>
+            )}
           </>
         ) : plantWallet ? (
           <div className="relative flex items-center gap-1 bg-black/50 backdrop-blur-md pl-1 pr-2 py-1 rounded-full border-0 shadow-2xl overflow-hidden -ml-4">
