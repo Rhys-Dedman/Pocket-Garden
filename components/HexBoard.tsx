@@ -4,6 +4,9 @@ import { BoardCell, Item, DragState } from '../types';
 import { PLANT_CONTAINER_WIDTH, PLANT_CONTAINER_HEIGHT } from '../constants/boardLayout';
 import { assetPath } from '../utils/assetPath';
 
+/** Set to false to disable swapping plants (drop on non-match just returns to original cell) */
+const ENABLE_SWAP = false;
+
 const LIFT_MS = 120;
 const SCALE_UP_MS = 60;
 const FLYBACK_SPEED_PX_PER_MS = 1;
@@ -274,8 +277,8 @@ export const HexBoard: React.FC<HexBoardProps> = ({
         } else if (inBounds && isEmptyCell) {
           onReleaseFromCell(dragState.cellIdx);
           startFlyBack(releaseState, targetIdx!, false, false);
-        } else if (inBounds && isSwapTarget) {
-          // Swap plants
+        } else if (ENABLE_SWAP && inBounds && isSwapTarget) {
+          // Swap plants (disabled when ENABLE_SWAP is false)
           onReleaseFromCell(dragState.cellIdx);
           startFlyBack(releaseState, targetIdx!, false, true);
         } else if (inBounds && targetIdx == null && !droppedOnSameCell) {

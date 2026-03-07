@@ -6,12 +6,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { assetPath } from '../utils/assetPath';
 
-const MOVE_DURATION_MS = 450;
-const MAX_TRAIL_POINTS = 25;
+const MOVE_DURATION_MS = 350;
+const MAX_TRAIL_POINTS = 19; // 25% shorter (was 25)
 const TRAIL_FADE_AFTER_HIT_MS = 220;
 const PARTICLE_SIZE = 40; // same as goal icon
 const TRAIL_COLOR = '#dfbb38';
-const TRAIL_STROKE_WIDTH = 21;
+const TRAIL_STROKE_WIDTH = 32; // 1.5x thicker (was 21)
 
 interface Point {
   x: number;
@@ -95,7 +95,7 @@ export const GoalCoinParticle: React.FC<GoalCoinParticleProps> = ({
 
         // Inverted seed path: down → left → up (trough at bottom). Deeper trough = more velocity on click
         const safetyMargin = containerHeight * 0.12;
-        const troughDepth = 140; // How far down before zooming up (was 60)
+        const troughDepth = 200; // How far down before zooming up
         const troughY = Math.min(containerHeight - safetyMargin, Math.max(start.y, target.y) + troughDepth);
         const leanFactor = 0.45;
         const cp1 = { x: start.x + dx * leanFactor, y: troughY };

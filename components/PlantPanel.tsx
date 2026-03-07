@@ -227,21 +227,30 @@ export const PlantPanel: React.FC<PlantPanelProps> = ({
               if (i === 0) return null;
               const prev = trail[i - 1].p;
               const curr = seg.p;
+              const x1 = prev.x, y1 = prev.y, x2 = curr.x, y2 = curr.y;
+              const dx = x2 - x1, dy = y2 - y1;
+              const len = Math.sqrt(dx * dx + dy * dy);
+              if (len < 0.01) return null;
               const segmentCount = Math.max(1, trail.length - 1);
               const taperProgress = (i - 1) / Math.max(1, segmentCount - 1);
               const widthScale = 1.0 - taperProgress * 0.5;
               const opacityScale = 1.0 - taperProgress;
+              const halfW = (circleDiameter * widthScale) / 2;
+              const perpX = -dy / len;
+              const perpY = dx / len;
+              const points = [
+                [x1 + perpX * halfW, y1 + perpY * halfW],
+                [x1 - perpX * halfW, y1 - perpY * halfW],
+                [x2 - perpX * halfW, y2 - perpY * halfW],
+                [x2 + perpX * halfW, y2 + perpY * halfW],
+              ];
+              const d = points.map(([x, y]) => `${x},${y}`).join(' ');
               return (
-                <line
+                <polygon
                   key={`pt-${i}`}
-                  x1={prev.x}
-                  y1={prev.y}
-                  x2={curr.x}
-                  y2={curr.y}
-                  stroke={seg.color}
-                  strokeWidth={circleDiameter * widthScale}
-                  strokeLinecap="round"
-                  strokeOpacity={opacityScale}
+                  points={d}
+                  fill={seg.color}
+                  fillOpacity={opacityScale}
                 />
               );
             })}

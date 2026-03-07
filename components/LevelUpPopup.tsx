@@ -24,15 +24,23 @@ interface LeafParticle {
 interface LevelUpPopupProps {
   isVisible: boolean;
   onClose: () => void;
-  level: number;
+  level?: number;
   /** Dynamic title based on what's being unlocked (e.g. "Storage Capacity") */
   title: string;
   /** Dynamic description (e.g. "You can now increase the amount of seeds you can store") */
   description: string;
   /** Icon path for header (matches the upgrade being unlocked) */
   icon: string;
-  onUnlockNow: () => void;
+  onUnlockNow?: () => void;
   appScale?: number;
+  /** When provided, show smaller text above title (e.g. "New Feature") */
+  subtitle?: string;
+  /** Button text (default "Unlock Now!") */
+  buttonText?: string;
+  /** Icon scale in header (default 1, use 0.8 for 80%) */
+  iconScale?: number;
+  /** When true, hide "Level X" (for info-style popups) */
+  hideLevel?: boolean;
 }
 
 const POPUP_LEAF_COUNT = 40;
@@ -87,12 +95,16 @@ function createPopupLeaves(): LeafParticle[] {
 export const LevelUpPopup: React.FC<LevelUpPopupProps> = ({
   isVisible,
   onClose,
-  level,
+  level = 1,
   title,
   description,
   icon,
   onUnlockNow,
   appScale = 1,
+  subtitle,
+  buttonText = 'Unlock Now!',
+  iconScale = 1,
+  hideLevel = false,
 }) => {
   const [animState, setAnimState] = useState<'hidden' | 'entering' | 'visible' | 'leaving'>('hidden');
   const [assetsReady, setAssetsReady] = useState(false);
@@ -210,7 +222,7 @@ export const LevelUpPopup: React.FC<LevelUpPopupProps> = ({
     setAnimState('leaving');
     setTimeout(() => {
       setAnimState('hidden');
-      onUnlockNow();
+      onUnlockNow?.();
       onClose();
     }, 150);
   };
@@ -347,8 +359,8 @@ export const LevelUpPopup: React.FC<LevelUpPopupProps> = ({
               alt=""
               className="relative object-contain"
               style={{
-                width: '75px',
-                height: '75px',
+                width: `${75 * iconScale}px`,
+                height: `${75 * iconScale}px`,
                 filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))',
                 marginTop: '-4px',
               }}
@@ -377,26 +389,44 @@ export const LevelUpPopup: React.FC<LevelUpPopupProps> = ({
               }}
             >
               <div className="flex flex-col items-center">
-                {/* Title - "Level X" */}
-                <h2
-                  className="font-normal text-center"
-                  style={{
-                    color: '#c2b280',
-                    fontFamily: 'Inter, sans-serif',
-                    letterSpacing: '-0.02em',
-                    fontSize: '2.25rem',
-                  }}
-                >
-                  Level {level}
-                </h2>
+                {/* Title - "Level X" (hidden when hideLevel) */}
+                {!hideLevel && (
+                  <h2
+                    className="font-normal text-center"
+                    style={{
+                      color: '#c2b280',
+                      fontFamily: 'Inter, sans-serif',
+                      letterSpacing: '-0.02em',
+                      fontSize: '2.25rem',
+                    }}
+                  >
+                    Level {level}
+                  </h2>
+                )}
 
-                {/* Subtitle - dynamic unlock title (e.g. "Storage Capacity") */}
+                {/* Subtitle - smaller text above main title (e.g. "New Feature") */}
+                {subtitle && (
+                  <h2
+                    className="font-normal text-center"
+                    style={{
+                      color: '#76a0b7',
+                      fontFamily: 'Inter, sans-serif',
+                      letterSpacing: '-0.02em',
+                      fontSize: '2rem',
+                      marginTop: hideLevel ? '0' : '-8px',
+                    }}
+                  >
+                    {subtitle}
+                  </h2>
+                )}
+
+                {/* Main title - dynamic (e.g. "Storage Capacity" or "Seeds Evolve!") */}
                 <h3
                   className="font-black tracking-tight text-center"
                   style={{
                     color: '#5c4a32',
                     fontFamily: 'Inter, sans-serif',
-                    marginTop: '-8px',
+                    marginTop: subtitle ? '4px' : '-8px',
                     fontSize: '3.5rem',
                   }}
                 >
@@ -459,7 +489,7 @@ export const LevelUpPopup: React.FC<LevelUpPopupProps> = ({
                       fontSize: '2rem',
                     }}
                   >
-                    Unlock Now!
+                    {buttonText}
                   </span>
                 </button>
               </div>

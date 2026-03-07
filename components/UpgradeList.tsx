@@ -8,25 +8,11 @@ export interface UpgradeState {
   progress: number;
 }
 
-export type SeedsState = Record<string, UpgradeState> & {
-  /** Base plant tier for seed shooting (starts at 1, increases when quality hits 100%) */
-  seedBaseTier?: number;
-};
+export type SeedsState = Record<string, UpgradeState>;
 
-/** Get the current seed quality percentage (0-100) within the current tier */
-export const getSeedQualityPercent = (seedsState: SeedsState): number => {
-  const qualityLevel = seedsState.seed_quality?.level ?? 0;
-  return (qualityLevel % 10) * 10; // 0-90% in increments of 10
-};
-
-/** Get the base plant tier (what level plant is shot normally) */
-export const getSeedBaseTier = (seedsState: SeedsState): number => {
-  return seedsState.seedBaseTier ?? 1;
-};
-
-/** Get the target tier shown in description (base tier + 1) */
-export const getSeedTargetTier = (seedsState: SeedsState): number => {
-  return getSeedBaseTier(seedsState) + 1;
+/** Seed level from highest plant discovered: 1 + floor((highestPlant - 1) / 3). Every 3 plants = +1 seed level. */
+export const getSeedLevelFromHighestPlant = (highestPlant: number): number => {
+  return 1 + Math.floor((Math.max(1, highestPlant) - 1) / 3);
 };
 
 /** Get the bonus seed chance percentage (0-50%, 5% per level, max level 10) */
@@ -39,12 +25,6 @@ export const getBonusSeedChance = (seedsState: SeedsState): number => {
 export const isBonusSeedMaxed = (seedsState: SeedsState): boolean => {
   const level = seedsState.bonus_seeds?.level ?? 0;
   return level >= 10; // Max at level 10 (50%)
-};
-
-/** Check if seed_quality upgrade is maxed (target tier would exceed highest plant ever) */
-export const isSeedQualityMaxed = (seedsState: SeedsState, highestPlantEver: number): boolean => {
-  const targetTier = getSeedTargetTier(seedsState);
-  return targetTier > highestPlantEver;
 };
 
 /** Get the merge harvest chance percentage (5% per level, chance to harvest adjacent crops on merge) */
@@ -117,7 +97,7 @@ interface UpgradeListProps {
   fertilizableCellCount?: number;
   /** Called when fertile_soil is upgraded to make a cell fertile */
   onFertilizeCell?: () => void;
-  /** Highest plant level ever achieved by the player (for seed_quality max check) */
+  /** Highest plant level ever achieved by the player */
   highestPlantEver?: number;
   /** Rewarded offers to display at top of relevant tabs */
   rewardedOffers?: RewardedOffer[];
@@ -142,8 +122,6 @@ interface UpgradeDef {
 interface UpgradeCostConfig {
   baseCost: number;
   growth: number;
-  /** For stage-based pricing (seed_quality), costs per stage */
-  stageCosts?: number[];
 }
 
 const UPGRADE_COSTS: Record<string, UpgradeCostConfig> = {
@@ -152,7 +130,6 @@ const UPGRADE_COSTS: Record<string, UpgradeCostConfig> = {
   seed_storage: { baseCost: 40, growth: 1.16 },
   seed_surplus: { baseCost: 120, growth: 1.22 },
   bonus_seeds: { baseCost: 300, growth: 1.28 }, // Seed Luck
-  seed_quality: { baseCost: 250, growth: 1, stageCosts: [250, 900, 3000, 10000] }, // Stage-based pricing
   
   // CROPS (Garden)
   harvest_speed: { baseCost: 90, growth: 1.18 },
@@ -164,7 +141,6 @@ const UPGRADE_COSTS: Record<string, UpgradeCostConfig> = {
   // HARVEST (Orders)
   customer_speed: { baseCost: 100, growth: 1.20 },
   market_value: { baseCost: 200, growth: 1.25 },
-  premium_orders: { baseCost: 150, growth: 1.22 },
   surplus_sales: { baseCost: 120, growth: 1.18 },
   happy_customer: { baseCost: 250, growth: 1.28 },
 };
@@ -173,13 +149,6 @@ const UPGRADE_COSTS: Record<string, UpgradeCostConfig> = {
 const calculateUpgradeCost = (upgradeId: string, currentLevel: number): number => {
   const config = UPGRADE_COSTS[upgradeId];
   if (!config) return 0;
-  
-  // Special handling for seed_quality: stage-based pricing
-  if (upgradeId === 'seed_quality' && config.stageCosts) {
-    const stage = Math.floor(currentLevel / 10); // 0-9 = stage 0, 10-19 = stage 1, etc.
-    const stageCost = config.stageCosts[Math.min(stage, config.stageCosts.length - 1)];
-    return Math.round(stageCost / 5) * 5;
-  }
   
   // Normal exponential scaling: cost = base * (growth^level)
   const rawCost = config.baseCost * Math.pow(config.growth, currentLevel);
@@ -202,7 +171,6 @@ const formatCost = (cost: number): string => {
 const SEEDS_UPGRADES: UpgradeDef[] = [
   { id: 'seed_production', name: 'Production Speed', icon: assetPath('/assets/icons/icon_seedproduction.png'), description: 'Increase how fast seeds are produced' },
   { id: 'seed_storage', name: 'Storage Capacity', icon: assetPath('/assets/icons/icon_seedstorage.png'), description: 'Increase the amount of seeds you can store' },
-  { id: 'seed_quality', name: 'Seed Quality', icon: assetPath('/assets/icons/icon_seedquality.png') }, // Description is dynamic, rendered inline
   { id: 'seed_surplus', name: 'Surplus Seeds', icon: assetPath('/assets/icons/icon_seedsurplus.png'), description: 'Extra seeds become coins when storage is full' },
   { id: 'bonus_seeds', name: 'Lucky Seed', icon: assetPath('/assets/icons/icon_luckyseed.png'), description: 'Increase the chance for seeds to grow an extra plant' },
 ];
@@ -210,25 +178,23 @@ const SEEDS_UPGRADES: UpgradeDef[] = [
 const SEEDS_UNLOCK_LEVELS: Record<string, number> = {
   seed_production: 1,
   seed_storage: 2,
-  seed_quality: 6,
-  seed_surplus: 10,
-  bonus_seeds: 13,
+  seed_surplus: 6,
+  bonus_seeds: 9,
 };
 
 const CROPS_UNLOCK_LEVELS: Record<string, number> = {
   harvest_speed: 1,
   plot_expansion: 3,
   crop_value: 7,
-  fertile_soil: 11,
-  merge_harvest: 14,
+  fertile_soil: 12,
+  merge_harvest: 10,
 };
 
 const HARVEST_UNLOCK_LEVELS: Record<string, number> = {
   customer_speed: 1,
   market_value: 4,
-  premium_orders: 8,
-  surplus_sales: 12,
-  happy_customer: 15,
+  surplus_sales: 8,
+  happy_customer: 11,
 };
 
 /** Get level unlock info for level-up popup. Returns title, description, icon, and optionally upgradeId/tab for Unlock Now behavior. */
@@ -238,16 +204,13 @@ export const getLevelUnlockInfo = (level: number): { title: string; description:
     { level: 3, upgradeId: 'plot_expansion', tab: 'CROPS', name: 'Garden Expansion', description: 'Unlock additional plots in the garden', icon: 'icon_plotexpansion.png' },
     { level: 4, upgradeId: 'market_value', tab: 'HARVEST', name: 'Market Value', description: 'Increase the coins earned when completing orders', icon: 'icon_marketvalue.png' },
     { level: 5, upgradeId: '', tab: 'HARVEST', name: 'Extra Orders', description: 'You can now hold +1 extra order at a time', icon: 'icon_extracustomer.png' },
-    { level: 6, upgradeId: 'seed_quality', tab: 'SEEDS', name: 'Seed Quality', description: 'Increase the chance to produce higher level plants', icon: 'icon_seedquality.png' },
+    { level: 6, upgradeId: 'seed_surplus', tab: 'SEEDS', name: 'Surplus Seeds', description: 'Extra seeds become coins when storage is full', icon: 'icon_seedsurplus.png', popupDescription: 'Extra seeds will now become coins when your storage is full' },
     { level: 7, upgradeId: 'crop_value', tab: 'CROPS', name: 'Crop Yield', description: 'harvest more crops from each plant', icon: 'icon_cropvalue.png', popupDescription: 'You can now increase the number of crops harvested from each plant' },
-    { level: 8, upgradeId: 'premium_orders', tab: 'HARVEST', name: 'Premium Orders', description: 'More likely to get orders for crops above your current level', icon: 'icon_premiumorders.png', popupDescription: 'You can now upgrade orders to request higher-level crops' },
-    { level: 9, upgradeId: '', tab: 'HARVEST', name: 'Extra Orders', description: 'You can now hold +1 extra order at a time', icon: 'icon_extracustomer.png' },
-    { level: 10, upgradeId: 'seed_surplus', tab: 'SEEDS', name: 'Surplus Seeds', description: 'Extra seeds become coins when storage is full', icon: 'icon_seedsurplus.png', popupDescription: 'Extra seeds will now become coins when your storage is full' },
-    { level: 11, upgradeId: 'fertile_soil', tab: 'CROPS', name: 'Fertile Soil', description: 'Fertile plots yield double crops when harvested', icon: 'icon_fetilesoil.png', popupDescription: 'You can now create fertile soil to yield double crops when harvested' },
-    { level: 12, upgradeId: 'surplus_sales', tab: 'HARVEST', name: 'Surplus Sales', description: 'Increase the coins earned from surplus plants', icon: 'icon_surplussales.png', popupDescription: 'Plants without matching orders can now be harvested for coins' },
-    { level: 13, upgradeId: 'bonus_seeds', tab: 'SEEDS', name: 'Lucky Seed', description: 'Increase the chance for seeds to grow an extra plant', icon: 'icon_luckyseed.png' },
-    { level: 14, upgradeId: 'merge_harvest', tab: 'CROPS', name: 'Chain Harvest', description: 'Increase chance for merges to harvest nearby plants', icon: 'icon_mergeharvest.png', popupDescription: 'Merging now has a chance to instantly harvest nearby plants' },
-    { level: 15, upgradeId: 'happy_customer', tab: 'HARVEST', name: 'Happy Customer', description: 'Increase chance that customers pay double for orders', icon: 'icon_happycustomer.png', popupDescription: 'You can now increase the chance for customers to pay double coins for orders' },
+    { level: 8, upgradeId: 'surplus_sales', tab: 'HARVEST', name: 'Surplus Sales', description: 'Increase the coins earned from surplus plants', icon: 'icon_surplussales.png', popupDescription: 'Plants without matching orders can now be harvested for coins' },
+    { level: 9, upgradeId: 'bonus_seeds', tab: 'SEEDS', name: 'Lucky Seed', description: 'Increase the chance for seeds to grow an extra plant', icon: 'icon_luckyseed.png' },
+    { level: 10, upgradeId: 'merge_harvest', tab: 'CROPS', name: 'Chain Harvest', description: 'Increase chance for merges to harvest nearby plants', icon: 'icon_mergeharvest.png', popupDescription: 'Merging now has a chance to instantly harvest nearby plants' },
+    { level: 11, upgradeId: 'happy_customer', tab: 'HARVEST', name: 'Happy Customer', description: 'Increase chance that customers pay double for orders', icon: 'icon_happycustomer.png', popupDescription: 'You can now increase the chance for customers to pay double coins for orders' },
+    { level: 12, upgradeId: 'fertile_soil', tab: 'CROPS', name: 'Fertile Soil', description: 'Fertile plots yield double crops when harvested', icon: 'icon_fetilesoil.png', popupDescription: 'You can now create fertile soil to yield double crops when harvested' },
   ];
   const match = allUnlocks.find(u => u.level === level);
   if (match) {
@@ -270,14 +233,13 @@ const CROPS_UPGRADES: UpgradeDef[] = [
   { id: 'harvest_speed', name: 'Harvest Speed', icon: assetPath('/assets/icons/icon_harvestspeed.png'), description: 'Increase automatic harvest cycle speed' },
   { id: 'plot_expansion', name: 'Garden Expansion', icon: assetPath('/assets/icons/icon_plotexpansion.png'), description: 'Unlock additional plots in the garden' },
   { id: 'crop_value', name: 'Crop Yield', icon: assetPath('/assets/icons/icon_cropvalue.png'), description: 'Plants produce more crops per harvest' },
-  { id: 'fertile_soil', name: 'Fertile Soil', icon: assetPath('/assets/icons/icon_fetilesoil.png'), description: 'Fertile plots yield double crops when harvested' },
   { id: 'merge_harvest', name: 'Chain Harvest', icon: assetPath('/assets/icons/icon_mergeharvest.png'), description: 'Increase chance for merges to harvest nearby plants' },
+  { id: 'fertile_soil', name: 'Fertile Soil', icon: assetPath('/assets/icons/icon_fetilesoil.png'), description: 'Fertile plots yield double crops when harvested' },
 ];
 
 const HARVEST_UPGRADES: UpgradeDef[] = [
   { id: 'customer_speed', name: 'Order Speed', icon: assetPath('/assets/icons/icon_customerspeed.png'), description: 'Reduce the time it takes for new orders to appear' },
   { id: 'market_value', name: 'Market Value', icon: assetPath('/assets/icons/icon_marketvalue.png'), description: 'Increase the coins earned when completing orders' },
-  { id: 'premium_orders', name: 'Premium Orders', icon: assetPath('/assets/icons/icon_premiumorders.png'), description: 'More likely to get orders above level' },
   { id: 'surplus_sales', name: 'Surplus Sales', icon: assetPath('/assets/icons/icon_surplussales.png'), description: 'Increase the coins earned from surplus plants' },
   { id: 'happy_customer', name: 'Happy Customer', icon: assetPath('/assets/icons/icon_happycustomer.png'), description: 'Increase chance that customers pay double for orders' },
 ];
@@ -296,10 +258,6 @@ const getSeedsUpgradeValue = (upgradeId: string, level: number, seedsState?: See
   switch (upgradeId) {
     case 'seed_production':
       return `${Math.min(10, 3 + level)}/min`;
-    case 'seed_quality':
-      // Display quality % within current tier (0-90%)
-      const qualityPercent = seedsState ? getSeedQualityPercent(seedsState) : (level % 10) * 10;
-      return `${qualityPercent}%`;
     case 'seed_storage':
       return `${1 + level}`; // +1 storage per upgrade
     case 'bonus_seeds':
@@ -336,8 +294,6 @@ const getHarvestUpgradeValue = (upgradeId: string, level: number): string | null
       return `${Math.max(0, 10 - level)}s`;
     case 'market_value':
       return `${(1 + 0.5 * level).toFixed(1)}x`;
-    case 'premium_orders':
-      return `${1 + level}`;
     case 'surplus_sales':
       return `${(1 + 0.2 * level).toFixed(1)}x`;
     case 'happy_customer':
@@ -427,15 +383,13 @@ const getUpgradeCostValue = (upgradeId: string, currentLevel: number): number =>
 const createInitialState = (upgrades: UpgradeDef[]) =>
   upgrades.reduce((acc, curr) => ({ ...acc, [curr.id]: { level: 1, progress: 0 } }), {} as Record<string, UpgradeState>);
 
-/** Initial seeds state: seed_production, seed_storage, seed_quality, and bonus_seeds start at level 0.
- * seed_quality starts at 0% chance with baseTier 1 (shooting plant_1).
+/** Initial seeds state: seed_production, seed_storage, bonus_seeds, seed_surplus start at level 0.
  * bonus_seeds starts at 0% chance (max 50% at level 10).
  */
 export const createInitialSeedsState = (): SeedsState => ({
   ...createInitialState(SEEDS_UPGRADES),
   seed_production: { level: 0, progress: 0 },
   seed_storage: { level: 0, progress: 0 },
-  seed_quality: { level: 0, progress: 0 },
   bonus_seeds: { level: 0, progress: 0 },
   seed_surplus: { level: 0, progress: 0 },
 });
@@ -453,7 +407,6 @@ export const createInitialCropsState = (): Record<string, UpgradeState> => ({
 export const createInitialHarvestState = (): Record<string, UpgradeState> => ({
   customer_speed: { level: 0, progress: 0 },
   market_value: { level: 0, progress: 0 },
-  premium_orders: { level: 0, progress: 0 },
   surplus_sales: { level: 0, progress: 0 },
   happy_customer: { level: 0, progress: 0 },
 });
@@ -503,6 +456,11 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
 
   useEffect(() => {
     if (!pendingUnlockUpgradeId) return;
+    if (!isExpanded) {
+      setUnlockFlashIds(prev => { const n = new Set(prev); n.delete(pendingUnlockUpgradeId!); return n; });
+      setCompletedUnlockFlashIds(prev => new Set(prev).add(pendingUnlockUpgradeId!));
+      return;
+    }
 
     const TAB_SLIDE_MS = 700;
     const SCROLL_DURATION_MS = 800;
@@ -562,8 +520,15 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
       clearTimeout(scrollT);
       clearTimeout(clearT);
       if (scrollRafId) cancelAnimationFrame(scrollRafId);
+      // Clear flash immediately when effect tears down (panel closed, tab switched, etc.) so it never gets stuck
+      setUnlockFlashIds(prev => {
+        const next = new Set(prev);
+        next.delete(pendingUnlockUpgradeId);
+        return next;
+      });
+      setCompletedUnlockFlashIds(prev => new Set(prev).add(pendingUnlockUpgradeId));
     };
-  }, [pendingUnlockUpgradeId, activeTab]);
+  }, [pendingUnlockUpgradeId, activeTab, isExpanded]);
 
   useEffect(() => {
     const cleanups: (() => void)[] = [];
@@ -714,16 +679,6 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
       // One purchase = one level up (no 10-step progress)
       const newLevel = current.level + 1;
       
-      // Special handling for seed_quality: when reaching 100% (level multiple of 10), increase base tier
-      if (id === 'seed_quality' && newLevel > 0 && newLevel % 10 === 0) {
-        const currentBaseTier = prev.seedBaseTier ?? 1;
-        return { 
-          ...prev, 
-          [id]: { level: newLevel, progress: 0 },
-          seedBaseTier: currentBaseTier + 1
-        };
-      }
-      
       return { ...prev, [id]: { level: newLevel, progress: 0 } };
     });
   };
@@ -847,14 +802,12 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
         const isMaxed = 
           (upgrade.id === 'seed_production' && state.level >= 7) || // 3+7=10/min max
           (upgrade.id === 'harvest_speed' && state.level >= 7) || // 3+7=10/min max
-          (upgrade.id === 'seed_quality' && isSeedQualityMaxed(stateMap as SeedsState, highestPlantEver)) ||
           (upgrade.id === 'bonus_seeds' && isBonusSeedMaxed(stateMap as SeedsState)) ||
           (upgrade.id === 'plot_expansion' && isPlotExpansionMaxed(lockedCellCount)) ||
           (upgrade.id === 'fertile_soil' && isFertileSoilMaxed(fertilizableCellCount)) ||
           (upgrade.id === 'crop_value' && isCropYieldMaxed(stateMap)) ||
           (upgrade.id === 'merge_harvest' && isMergeHarvestMaxed(stateMap)) ||
           (upgrade.id === 'customer_speed' && isCustomerSpeedMaxed(stateMap)) ||
-          (upgrade.id === 'premium_orders' && isPremiumOrdersMaxed(stateMap)) ||
           (upgrade.id === 'happy_customer' && isHappyCustomerMaxed(stateMap));
         
         const descTextColor = '#c2b180';
@@ -882,15 +835,6 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
         const harvestValue = category === 'HARVEST' ? getHarvestUpgradeValue(upgrade.id, state.level) : null;
         const displayValue = seedsValue ?? cropsValue ?? harvestValue;
         
-        // For seed_quality, calculate the target tier (base tier + 1)
-        const seedQualityTargetTier = upgrade.id === 'seed_quality'
-          ? getSeedTargetTier(stateMap as SeedsState)
-          : null;
-        // For premium_orders, the min level for "above" (1 + level)
-        const premiumOrdersMinLevel = upgrade.id === 'premium_orders'
-          ? getPremiumOrdersMinLevel(stateMap as HarvestState)
-          : null;
-
         const UNLOCK_FLASH_BLUE = '#89c8e1';
         return (
           <div 
@@ -936,22 +880,12 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
                     </span>
                   )}
                 </div>
-                {/* Description - seed_quality has dynamic description, others use static or generic yield */}
+                {/* Description */}
                 <div
-                  className={`text-[11px] font-semibold mt-0.5 tracking-tight ${(upgrade.description || upgrade.id === 'seed_quality' || upgrade.id === 'premium_orders') ? '' : 'uppercase'} ${isFlashing && !isUnlockFlashing ? 'text-[#386641]/50' : ''}`}
+                  className={`text-[11px] font-semibold mt-0.5 tracking-tight ${upgrade.description ? '' : 'uppercase'} ${isFlashing && !isUnlockFlashing ? 'text-[#386641]/50' : ''}`}
                   style={{ color: isUnlockFlashing ? '#7497b0' : isFlashing ? undefined : descTextColor }}
                 >
-                  {upgrade.id === 'seed_quality' ? (
-                    <>
-                      Increase the chance to produce level <span style={{ color: SEEDS_VALUE_GREEN, fontWeight: 700 }}>{seedQualityTargetTier}</span> plants
-                    </>
-                  ) : upgrade.id === 'premium_orders' && premiumOrdersMinLevel != null ? (
-                    <>
-                      More likely to get orders for crops above level <span style={{ color: SEEDS_VALUE_GREEN, fontWeight: 700 }}>{premiumOrdersMinLevel}</span>
-                    </>
-                  ) : (
-                    upgrade.description ?? `YIELD: +${(state.level * 30).toFixed(0)}%`
-                  )}
+                  {upgrade.description ?? `YIELD: +${(state.level * 30).toFixed(0)}%`}
                 </div>
               </div>
 

@@ -3,7 +3,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { HexBoard } from './components/HexBoard';
 import { UpgradeTabs } from './components/UpgradeTabs';
-import { UpgradeList, createInitialSeedsState, createInitialHarvestState, createInitialCropsState, getSeedQualityPercent, getSeedBaseTier, getBonusSeedChance, getSeedSurplusValue, getCropYieldPerHarvest, getHarvestSpeedLevel, getMergeHarvestChance, getGoalLoadingSeconds, getMarketValueMultiplier, getPremiumOrdersMinLevel, getSurplusSalesMultiplier, getHappyCustomerChance, HarvestState, UpgradeState, RewardedOffer, getLevelUnlockInfo } from './components/UpgradeList';
+import { UpgradeList, createInitialSeedsState, createInitialHarvestState, createInitialCropsState, getSeedLevelFromHighestPlant, getBonusSeedChance, getSeedSurplusValue, getCropYieldPerHarvest, getHarvestSpeedLevel, getMergeHarvestChance, getGoalLoadingSeconds, getMarketValueMultiplier, getPremiumOrdersMinLevel, getSurplusSalesMultiplier, getHappyCustomerChance, HarvestState, UpgradeState, RewardedOffer, getLevelUnlockInfo } from './components/UpgradeList';
 import { Navbar } from './components/Navbar';
 import { StoreScreen } from './components/StoreScreen';
 import { SideAction } from './components/SideAction';
@@ -33,14 +33,21 @@ export function getCoinValueForLevel(level: number): number {
   return 5 * Math.pow(2, level - 1);
 }
 
+/** Format coin amount like wallet: 1120 -> "1.1K", 2100 -> "2.1K" */
+const formatGoalCoin = (amount: number): string => {
+  if (amount >= 1000000) return (amount / 1000000).toFixed(1) + 'M';
+  if (amount >= 1000) return (amount / 1000).toFixed(1) + 'K';
+  return amount.toString();
+};
+
 /** Max goal slots: 3 until level 5, then 4 until level 7, then 5 */
 const getMaxGoalSlots = (playerLevel: number): number =>
   playerLevel >= 9 ? 5 : playerLevel >= 5 ? 4 : 3;
 
-/** Goals required to level up. Start at 3 for level 1→2; each level = round(previous × 1.25) */
+/** Goals required to level up. Start at 5 for level 1→2; each level = round(previous × 1.25) */
 const getGoalsRequiredForLevel = (level: number): number => {
-  if (level <= 1) return 3;
-  let prev = 3;
+  if (level <= 1) return 5;
+  let prev = 5;
   for (let i = 2; i <= level; i++) {
     prev = Math.round(prev * 1.25);
   }
@@ -60,11 +67,12 @@ const getDiscoveryGoalEvery = (highestPlant: number): number => {
   return 10; // 11+ : every 10 goals, max
 };
 
-/** Pick plant level for a new goal. Every X goals is a discovery goal (highestPlantEver+1). Mutates counterRef. */
+/** Pick plant level for a new goal. Every X goals is a discovery goal (highestPlantEver+1). Mutates counterRef. Never returns below seedLevel. */
 const pickGoalPlantLevel = (
   highestPlantEver: number,
   counterRef: { current: number },
-  minLevel: number
+  minLevel: number,
+  seedLevel: number
 ): number => {
   const every = getDiscoveryGoalEvery(highestPlantEver);
   if (highestPlantEver < 24 && counterRef.current >= every - 1) {
@@ -72,10 +80,13 @@ const pickGoalPlantLevel = (
     return highestPlantEver + 1;
   }
   counterRef.current++;
+  const effectiveMin = Math.max(minLevel, seedLevel);
+  const maxForRandom = Math.max(5, Math.min(24, highestPlantEver));
   const aboveMin = Math.random() < 0.5;
-  return aboveMin
-    ? (minLevel >= 5 ? 5 : minLevel + 1 + Math.floor(Math.random() * (5 - minLevel)))
-    : 1 + Math.floor(Math.random() * minLevel);
+  const level = aboveMin
+    ? (effectiveMin >= maxForRandom ? maxForRandom : effectiveMin + 1 + Math.floor(Math.random() * (maxForRandom - effectiveMin)))
+    : effectiveMin + Math.floor(Math.random() * Math.max(1, maxForRandom - effectiveMin + 1));
+  return Math.max(seedLevel, Math.min(24, level));
 };
 
 /** Crops required for goal order. Scales with player level, crop yield, and has random variation. */
@@ -241,6 +252,9 @@ export default function App() {
   
   // Discovery popup state
   const [discoveryPopup, setDiscoveryPopup] = useState<{ isVisible: boolean; level: number } | null>(null);
+  // Seed progression popup - shown first time seed level increases (in front of discovery)
+  const [seedProgressionPopup, setSeedProgressionPopup] = useState<boolean>(false);
+  const hasShownSeedProgressionRef = useRef(false);
   // Plant info popup state (for barn)
   const [plantInfoPopup, setPlantInfoPopup] = useState<{ isVisible: boolean; level: number } | null>(null);
   // Limited offer popup state
@@ -290,7 +304,7 @@ export default function App() {
 
   const seedStorageLevel = seedsState?.seed_storage?.level ?? 0;
   const seedStorageMax = 1 + seedStorageLevel; // +1 storage per upgrade
-  const seedBaseTier = getSeedBaseTier(seedsState); // Current base tier for plant icon
+  const seedLevel = getSeedLevelFromHighestPlant(highestPlantEver); // Seed level scales with highest plant discovered
   
   const [activeProjectiles, setActiveProjectiles] = useState<ProjectileData[]>([]);
   const [impactCellIdx, setImpactCellIdx] = useState<number | null>(null);
@@ -328,8 +342,22 @@ export default function App() {
   const barnButtonRef = useRef<HTMLButtonElement>(null);
   const barnScrollRef = useRef<HTMLDivElement>(null);
   const barnScrollYRef = useRef(0);
+  // Slots with in-flight crops that will complete the goal; exclude from routing so follow-up harvests go to next goal
+  const goalsPendingCompletionRef = useRef<Set<number>>(new Set());
+
+  useEffect(() => {
+    goalSlots.forEach((s, i) => {
+      if (s === 'green') goalsPendingCompletionRef.current.delete(i);
+    });
+  }, [goalSlots]);
 
   useEffect(() => { highestPlantEverRef.current = highestPlantEver; }, [highestPlantEver]);
+  // If we've already passed first seed level increase (e.g. from save), don't show seed progression popup
+  useEffect(() => {
+    if (getSeedLevelFromHighestPlant(highestPlantEver) > 1) hasShownSeedProgressionRef.current = true;
+  }, [highestPlantEver]);
+
+  const prevSeedLevelRef = useRef(0);
 
   const [spriteCenter, setSpriteCenter] = useState({ x: 50, y: 50 }); // % relative to column, for sprite center
 
@@ -685,7 +713,8 @@ export default function App() {
       setGoalTransitionSlot(loadingIdx);
       setGoalTransitionFade(false);
       const minLevel = getPremiumOrdersMinLevel(harvestState);
-      const plantLevel = pickGoalPlantLevel(highestPlantEverRef.current, discoveryGoalCounterRef, minLevel);
+      const seedLevel = getSeedLevelFromHighestPlant(highestPlantEverRef.current);
+      const plantLevel = pickGoalPlantLevel(highestPlantEverRef.current, discoveryGoalCounterRef, minLevel, seedLevel);
       setGoalPlantTypes((p) => { const n = [...p]; n[loadingIdx] = plantLevel; return n; });
       const cropYieldLevel = cropsState?.crop_value?.level ?? 0;
       const goalRequired = getGoalCropRequired(playerLevel, cropYieldLevel);
@@ -724,7 +753,8 @@ export default function App() {
           setGoalTransitionSlot(loadingIdx);
           setGoalTransitionFade(false);
           const minLevel = getPremiumOrdersMinLevel(harvestState);
-          const plantLevel = pickGoalPlantLevel(highestPlantEverRef.current, discoveryGoalCounterRef, minLevel);
+          const seedLevel = getSeedLevelFromHighestPlant(highestPlantEverRef.current);
+          const plantLevel = pickGoalPlantLevel(highestPlantEverRef.current, discoveryGoalCounterRef, minLevel, seedLevel);
           setGoalPlantTypes((p) => { const n = [...p]; n[loadingIdx] = plantLevel; return n; });
           const cropYieldLevel = cropsState?.crop_value?.level ?? 0;
           const goalRequired = getGoalCropRequired(playerLevel, cropYieldLevel);
@@ -784,6 +814,69 @@ export default function App() {
       }
     }
   }, [playerLevel, isLoading, goalSlots, harvestState]);
+
+  // When seed level increases: auto-complete goals below seed level (give full coin value), auto-level plants below seed level (with beam VFX)
+  useEffect(() => {
+    const newSeedLevel = getSeedLevelFromHighestPlant(highestPlantEver);
+    if (newSeedLevel <= prevSeedLevelRef.current) return;
+    prevSeedLevelRef.current = newSeedLevel;
+
+    // 1. Auto-level plants on board that are below seed level
+    setGrid((prevGrid) => {
+      const cellsToUpgrade: number[] = [];
+      prevGrid.forEach((cell, idx) => {
+        if (cell.item && cell.item.level < newSeedLevel) cellsToUpgrade.push(idx);
+      });
+      if (cellsToUpgrade.length === 0) return prevGrid;
+      // Spawn beams for each cell (after DOM update)
+      requestAnimationFrame(() => {
+        const beams: { id: string; x: number; y: number; cellWidth: number; cellHeight: number; startTime: number }[] = [];
+        cellsToUpgrade.forEach((cellIdx) => {
+          const hexEl = document.getElementById(`hex-${cellIdx}`);
+          if (hexEl) {
+            const rect = hexEl.getBoundingClientRect();
+            beams.push({
+              id: `seed-level-up-${cellIdx}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              x: rect.left + rect.width / 2,
+              y: rect.top + rect.height / 2,
+              cellWidth: rect.width,
+              cellHeight: rect.height,
+              startTime: Date.now(),
+            });
+          }
+        });
+        if (beams.length > 0) setCellHighlightBeams((b) => [...b, ...beams]);
+      });
+      const newGrid = prevGrid.map((cell, idx) => {
+        if (cell.item && cell.item.level < newSeedLevel) {
+          return { ...cell, item: { ...cell.item, level: newSeedLevel } };
+        }
+        return cell;
+      });
+      return newGrid;
+    });
+
+    // 2. Auto-complete goals below seed level: transition to 'completed' (coin) state with bounce; player taps to collect
+    const slotsToComplete: number[] = [];
+    goalSlots.forEach((s, i) => {
+      if (s === 'green' && (goalPlantTypes[i] ?? 0) < newSeedLevel) slotsToComplete.push(i);
+    });
+    if (slotsToComplete.length > 0) {
+      slotsToComplete.forEach((slotIdx) => {
+        const plantLevel = goalPlantTypes[slotIdx] ?? slotIdx + 1;
+        const plantValue = getCoinValueForLevel(plantLevel);
+        const amountRequired = goalAmountsRequired[slotIdx] ?? 5;
+        const marketMultiplier = getMarketValueMultiplier(harvestState);
+        const rawValue = plantValue * amountRequired * 2 * marketMultiplier;
+        const roundedValue = Math.round(rawValue / 5) * 5;
+        setGoalCompletedValues((v) => { const n = [...v]; n[slotIdx] = roundedValue; return n; });
+        setGoalCounts((c) => { const n = [...c]; n[slotIdx] = 0; return n; });
+        setGoalSlots((s) => { const n = [...s]; n[slotIdx] = 'completed'; return n; });
+        setGoalBounceSlots((prev) => prev.includes(slotIdx) ? prev : [...prev, slotIdx]);
+        setTimeout(() => setGoalBounceSlots((b) => b.filter((i) => i !== slotIdx)), 400);
+      });
+    }
+  }, [highestPlantEver, harvestState, playerLevel, goalSlots, goalPlantTypes, goalAmountsRequired, grid]);
 
   /**
    * At 100% seed progress: add one seed to storage (if room), reset to 0% immediately.
@@ -969,7 +1062,8 @@ export default function App() {
     setIsExpanded(true);
   };
 
-  // Handle tap on locked cell: open CROPS tab (opens the upgrade panel)
+  // Handle tap on locked cell: open CROPS tab (opens the upgrade panel). Set to false to disable.
+  const ENABLE_LOCKED_CELL_TAP = false;
   const handleLockedCellTap = useCallback(() => {
     setActiveTab('CROPS');
     setIsExpanded(true);
@@ -1078,18 +1172,6 @@ export default function App() {
     }, 200);
   }, [grid]);
 
-  /** Calculate the plant level to spawn based on seed quality */
-  const calculatePlantLevel = useCallback((): number => {
-    const baseTier = getSeedBaseTier(seedsState);
-    const qualityPercent = getSeedQualityPercent(seedsState);
-    
-    // Roll for quality upgrade: qualityPercent% chance to spawn baseTier+1 instead of baseTier
-    if (qualityPercent > 0 && Math.random() * 100 < qualityPercent) {
-      return baseTier + 1;
-    }
-    return baseTier;
-  }, [seedsState]);
-
   const handlePlantClick = (e: React.MouseEvent) => {
     e.stopPropagation();
 
@@ -1104,9 +1186,8 @@ export default function App() {
         .filter((idx): idx is number => idx !== null);
       if (emptyIndices.length > 0) {
         const targetIdx = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
-        // Calculate plant level at the moment of shooting (quality chance is determined on tap)
-        const plantLevel = calculatePlantLevel();
-        spawnProjectile(targetIdx, plantLevel);
+        // All seeds spawn at seedLevel (from highest plant discovered)
+        spawnProjectile(targetIdx, seedLevel);
         setSeedsInStorage((prev) => Math.max(0, prev - 1));
         triggerSeedButtonLeafBurst();
         
@@ -1128,10 +1209,9 @@ export default function App() {
             secondTargetIdx = targetIdx;
           }
           
-          const secondPlantLevel = calculatePlantLevel();
           // Slight delay so the two seeds don't overlap visually
           setTimeout(() => {
-            spawnProjectile(secondTargetIdx, secondPlantLevel);
+            spawnProjectile(secondTargetIdx, seedLevel);
           }, 50);
         }
       }
@@ -1140,9 +1220,9 @@ export default function App() {
 
     if (isSeedFlashing) return;
 
-    // Add +30% progress when button is green (no seeds in storage)
+    // Add +35% progress when button is green (no seeds in storage)
     const start = Math.max(0, seedProgressRef.current);
-    const totalAfterTap = start + 30;
+    const totalAfterTap = start + 35;
     
     if (totalAfterTap > 100) {
       // Tap goes past 100%: add to storage, reset to 0%, then continue with remainder
@@ -1176,9 +1256,9 @@ export default function App() {
     e.stopPropagation();
     if (isHarvestFlashing) return;
 
-    // Add +30% progress per tap (animated via harvestTapZoomRef)
+    // Add +35% progress per tap (animated via harvestTapZoomRef)
     const current = harvestProgressRef.current;
-    const next = Math.min(100, current + 30);
+    const next = Math.min(100, current + 35);
     harvestTapZoomRef.current = { start: current, end: next, startTime: Date.now(), duration: 100 };
     setHarvestTapZoomTrigger((t) => t + 1);
 
@@ -1253,11 +1333,18 @@ export default function App() {
 
       const surplusMultiplier = getSurplusSalesMultiplier(harvestState);
       const surplusSalesUnlocked = playerLevel >= 12;
+      const allocated: Record<number, number> = {}; // per-slot allocation within this harvest
       grid.forEach((cell, cellIdx) => {
         if (!cell.item) return;
         const level = cell.item.level;
         const slotIdx = level >= 1 && level <= 24
-          ? goalPlantTypes.findIndex((pt, i) => pt === level && goalSlots[i] === 'green' && goalCounts[i] > 0)
+          ? goalPlantTypes.findIndex((pt, i) =>
+              pt === level &&
+              goalSlots[i] === 'green' &&
+              goalCounts[i] > 0 &&
+              !goalsPendingCompletionRef.current.has(i) &&
+              (goalCounts[i] ?? 0) - (allocated[i] ?? 0) > 0
+            )
           : -1;
         const hasGoalForPlant = slotIdx >= 0;
         if (!hasGoalForPlant && !surplusSalesUnlocked) return;
@@ -1275,6 +1362,10 @@ export default function App() {
         const hoverY = hexTopY - offsetUp;
 
         if (hasGoalForPlant) {
+          allocated[slotIdx] = (allocated[slotIdx] ?? 0) + cropYieldPerHarvest;
+          if ((goalCounts[slotIdx] ?? 0) - (allocated[slotIdx] ?? 0) <= 0) {
+            goalsPendingCompletionRef.current.add(slotIdx);
+          }
           const goalCenter = getGoalIconCenter(slotIdx);
           const dist = goalCenter ? Math.hypot(hoverX - goalCenter.x, hoverY - goalCenter.y) : 0;
           const plantLevel = goalPlantTypes[slotIdx] ?? slotIdx + 1;
@@ -1389,6 +1480,7 @@ export default function App() {
     const cropYieldPerHarvest = getCropYieldPerHarvest(cropsState);
     const surplusMultiplier = getSurplusSalesMultiplier(harvestState);
     const surplusSalesUnlocked = playerLevel >= 12;
+    const allocated: Record<number, number> = {};
 
     const getGoalIconCenter = (slotIdx: number): { x: number; y: number } | null => {
       const iconEl = goalIconRefs[slotIdx]?.current;
@@ -1406,7 +1498,13 @@ export default function App() {
 
       const level = cell.item.level;
       const slotIdx = level >= 1 && level <= 24
-        ? goalPlantTypes.findIndex((pt, i) => pt === level && goalSlots[i] === 'green' && goalCounts[i] > 0)
+        ? goalPlantTypes.findIndex((pt, i) =>
+            pt === level &&
+            goalSlots[i] === 'green' &&
+            goalCounts[i] > 0 &&
+            !goalsPendingCompletionRef.current.has(i) &&
+            (goalCounts[i] ?? 0) - (allocated[i] ?? 0) > 0
+          )
         : -1;
       const hasGoalForPlant = slotIdx >= 0;
       if (!hasGoalForPlant && !surplusSalesUnlocked) return;
@@ -1424,6 +1522,10 @@ export default function App() {
       const hoverY = hexTopY - offsetUp;
 
       if (hasGoalForPlant) {
+        allocated[slotIdx] = (allocated[slotIdx] ?? 0) + cropYieldPerHarvest;
+        if ((goalCounts[slotIdx] ?? 0) - (allocated[slotIdx] ?? 0) <= 0) {
+          goalsPendingCompletionRef.current.add(slotIdx);
+        }
         const goalCenter = getGoalIconCenter(slotIdx);
         const dist = goalCenter ? Math.hypot(hoverX - goalCenter.x, hoverY - goalCenter.y) : 0;
         const plantLevel = goalPlantTypes[slotIdx] ?? slotIdx + 1;
@@ -1570,7 +1672,15 @@ export default function App() {
     
     // Update highest plant ever if we created a new record and show discovery popup
     if (newLevel != null && newLevel > highestPlantEver) {
+      const prevSeedLevel = getSeedLevelFromHighestPlant(highestPlantEver);
+      const newSeedLevel = getSeedLevelFromHighestPlant(newLevel);
+      const isFirstSeedLevelIncrease = newSeedLevel > prevSeedLevel && !hasShownSeedProgressionRef.current;
+      if (isFirstSeedLevelIncrease) {
+        hasShownSeedProgressionRef.current = true;
+        setSeedProgressionPopup(true);
+      }
       setHighestPlantEver(newLevel);
+      discoveryGoalCounterRef.current = 0; // Reset so player gets to enjoy new plant before next discovery goal
       // Show discovery popup immediately when merge starts (feels more responsive)
       setDiscoveryPopup({ isVisible: true, level: newLevel });
     }
@@ -1739,7 +1849,7 @@ export default function App() {
                         if (!levelUpGuardRef.current) {
                           levelUpGuardRef.current = true;
                           const nextLevel = playerLevel + 1;
-                          if (nextLevel <= 15) {
+                          if (nextLevel <= 12) {
                             setLevelUpPopup({ isVisible: true, level: nextLevel });
                           } else {
                             setPlayerLevel((l) => l + 1);
@@ -1813,7 +1923,7 @@ export default function App() {
                           if (!levelUpGuardRef.current) {
                             levelUpGuardRef.current = true;
                             const nextLevel = playerLevel + 1;
-                            if (nextLevel <= 15) {
+                            if (nextLevel <= 12) {
                               setLevelUpPopup({ isVisible: true, level: nextLevel });
                             } else {
                               setPlayerLevel((l) => l + 1);
@@ -1916,7 +2026,7 @@ export default function App() {
                           {showCompletedContent && (
                             <>
                               <img ref={goalIconRefs[slotIdx]} src={assetPath('/assets/icons/icon_coin.png')} alt="" className={`absolute left-1/2 object-contain pointer-events-none ${isBouncing ? 'goal-icon-bounce' : ''}`} style={{ zIndex: 6, bottom: '71%', width: 40, height: 40, transform: 'translate(-50%, -2px)' }} />
-                              <span className="absolute left-1/2 font-bold pointer-events-none" style={{ zIndex: 6, bottom: '62%', color: '#c99959', fontSize: '15px', transform: 'translate(-50%, -1px)' }}>{goalCompletedValues[slotIdx]}</span>
+                              <span className="absolute left-1/2 font-bold pointer-events-none" style={{ zIndex: 6, bottom: '62%', color: '#c99959', fontSize: '15px', transform: 'translate(-50%, -1px)' }}>{formatGoalCoin(goalCompletedValues[slotIdx] ?? 0)}</span>
                             </>
                           )}
                           {showLoadingText && (
@@ -1951,7 +2061,7 @@ export default function App() {
                    <div className="pointer-events-auto flex items-center justify-center" ref={plantButtonRef} style={{ transform: 'scale(0.9)', transformOrigin: 'center center' }} onClick={(e) => e.stopPropagation()}>
 <SideAction
                         label="Plant"
-                        icon={assetPath(`/assets/plants/plant_${seedBaseTier}.png`)}
+                        icon={assetPath(`/assets/plants/plant_${seedLevel}.png`)}
                         iconScale={1.35}
                         iconOffsetY={-1}
                         progress={Math.max(0, Math.min(1, seedProgress / 100))}
@@ -2014,7 +2124,7 @@ export default function App() {
                     setDragState={setDragState}
                     harvestBounceCellIndices={harvestBounceCellIndices}
                     getMergeLevelIncrease={getMergeLevelIncrease}
-                    onLockedCellTap={handleLockedCellTap}
+                    onLockedCellTap={ENABLE_LOCKED_CELL_TAP ? handleLockedCellTap : undefined}
                     unlockingCellIndices={unlockingCellIndices}
                     fertilizingCellIndices={fertilizingCellIndices}
                     appScale={appScale}
@@ -2034,7 +2144,12 @@ export default function App() {
                       ]);
                       if (mergeResultLevel != null) {
                         const slotIdx = mergeResultLevel >= 1 && mergeResultLevel <= 24
-                          ? goalPlantTypes.findIndex((pt, i) => pt === mergeResultLevel && goalSlots[i] === 'green' && goalCounts[i] > 0)
+                          ? goalPlantTypes.findIndex((pt, i) =>
+                              pt === mergeResultLevel &&
+                              goalSlots[i] === 'green' &&
+                              goalCounts[i] > 0 &&
+                              !goalsPendingCompletionRef.current.has(i)
+                            )
                           : -1;
                         const hasGoalForPlant = slotIdx >= 0;
                         const surplusSalesUnlocked = playerLevel >= 12;
@@ -2046,6 +2161,10 @@ export default function App() {
                           ? ((hexEl.getBoundingClientRect().top - rect.top) / scale) - offsetUp
                           : py - offsetUp;
                         if (hasGoalForPlant) {
+                          const harvestAmount = getCropYieldPerHarvest(cropsState);
+                          if ((goalCounts[slotIdx] ?? 0) - harvestAmount <= 0) {
+                            goalsPendingCompletionRef.current.add(slotIdx);
+                          }
                           const plantLevel = goalPlantTypes[slotIdx] ?? slotIdx + 1;
                           setActivePlantPanels((prev) => [
                             ...prev,
@@ -2053,7 +2172,7 @@ export default function App() {
                               id: `merge-plant-${cellIdx}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
                               goalSlotIdx: slotIdx,
                               iconSrc: getGoalIconForPlantLevel(plantLevel),
-                              harvestAmount: getCropYieldPerHarvest(cropsState),
+                              harvestAmount,
                               startX: px,
                               startY: py,
                               hoverX,
@@ -2463,6 +2582,24 @@ export default function App() {
               />
             )}
 
+            {/* Seed Progression Popup - shown first time seed level increases, in front of discovery (blue theme) */}
+            {seedProgressionPopup && (
+              <div className="absolute inset-0" style={{ zIndex: 110 }}>
+                <LevelUpPopup
+                  isVisible={seedProgressionPopup}
+                  onClose={() => setSeedProgressionPopup(false)}
+                  title="Seeds Evolve!"
+                  description="Discovering more plants will increase the level of seeds you generate"
+                  icon={assetPath('/assets/icons/icon_seedquality.png')}
+                  subtitle="New Feature"
+                  buttonText="Got it!"
+                  iconScale={0.8}
+                  hideLevel={true}
+                  appScale={appScale}
+                />
+              </div>
+            )}
+
             {/* Plant Info Popup (Barn) */}
             {plantInfoPopup && (
               <PlantInfoPopup
@@ -2553,7 +2690,7 @@ export default function App() {
                   ]);
                   
                   // Seed Quality bonus: play highlight VFX if plant spawned at higher level than base tier
-                  if (p.plantLevel > seedBaseTier) {
+                  if (p.plantLevel > seedLevel) {
                     setCellHighlightBeams((prev) => [
                       ...prev,
                       {
@@ -2599,6 +2736,7 @@ export default function App() {
               targetRef={goalIconRefs[panel.goalSlotIdx]}
               appScale={appScale}
               onImpact={(goalSlotIdx, amount) => {
+                goalsPendingCompletionRef.current.delete(goalSlotIdx);
                 setGoalBounceSlots((prev) => prev.includes(goalSlotIdx) ? prev : [...prev, goalSlotIdx]);
                 setGoalImpactSlots((prev) => prev.includes(goalSlotIdx) ? prev : [...prev, goalSlotIdx]);
                 setGoalCounts((c) => {
