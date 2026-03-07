@@ -334,16 +334,34 @@ export default function App() {
   const [spriteCenter, setSpriteCenter] = useState({ x: 50, y: 50 }); // % relative to column, for sprite center
 
   // Track viewport dimensions for responsive scaling
-  const [viewportWidth, setViewportWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 420);
-  const [viewportHeight, setViewportHeight] = useState(typeof window !== 'undefined' ? window.innerHeight : 800);
+  // Use visualViewport when available (more accurate on mobile when browser chrome shows/hides)
+  const getViewportSize = () => {
+    if (typeof window === 'undefined') return { width: 420, height: 800 };
+    const vv = window.visualViewport;
+    if (vv) return { width: vv.width, height: vv.height };
+    return { width: window.innerWidth, height: window.innerHeight };
+  };
+  const [viewportWidth, setViewportWidth] = useState(typeof window !== 'undefined' ? getViewportSize().width : 420);
+  const [viewportHeight, setViewportHeight] = useState(typeof window !== 'undefined' ? getViewportSize().height : 800);
   
   useEffect(() => {
-    const handleResize = () => {
-      setViewportWidth(window.innerWidth);
-      setViewportHeight(window.innerHeight);
+    const update = () => {
+      const { width, height } = getViewportSize();
+      setViewportWidth(width);
+      setViewportHeight(height);
     };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    update();
+    window.addEventListener('resize', update);
+    const vv = window.visualViewport;
+    if (vv) vv.addEventListener('resize', update);
+    if (vv) vv.addEventListener('scroll', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      if (vv) {
+        vv.removeEventListener('resize', update);
+        vv.removeEventListener('scroll', update);
+      }
+    };
   }, []);
 
 // Countdown timer for rewarded offers (1 second tick)
@@ -374,13 +392,16 @@ export default function App() {
   const baseHeight = 796; // 448 * 16/9
   const scaleX = viewportWidth / baseWidth;
   const scaleY = viewportHeight / baseHeight;
-  const appScale = Math.min(scaleX, scaleY);
+  const fitScale = Math.min(scaleX, scaleY);
+  const mobileBreakpoint = 500;
+  // Desktop (wide viewport): cap at 1 so game stays 448×796, 9:16 at 100%
+  // Mobile (narrow): scale to fit, can scale up to fill the screen
+  const appScale = viewportWidth >= mobileBreakpoint ? Math.min(fitScale, 1) : fitScale;
   const appScaleRef = useRef(appScale);
   appScaleRef.current = appScale;
   
   // Calculate barn scale: only apply on narrow mobile screens (below 500px)
   // On wider screens, use scale 1 (no scaling)
-  const mobileBreakpoint = 500;
   const barnDesignWidth = 470;
   const barnPadding = 20;
   const barnScale = viewportWidth >= mobileBreakpoint 
