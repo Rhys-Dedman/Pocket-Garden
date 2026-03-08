@@ -24,6 +24,8 @@ export interface ActiveBoostData {
   endTime: number;
   durationMs: number;
   icon: string;
+  /** Links to the limited offer (e.g. 'super_seed_offer'); used when tapping boost to open the right popup */
+  offerId?: string;
 }
 
 interface ActiveBoostIndicatorProps {

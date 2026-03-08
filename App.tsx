@@ -60,6 +60,22 @@ const getGoalsRequiredForLevel = (level: number): number => {
 /** Goal difficulty scaling: 0.9 = easier, 1.0 = normal, 1.1 = harder, 1.2 = much harder */
 const GOAL_DIFFICULTY_SCALING = 1.0;
 
+/** Content for limited offer popup by offerId (used when opening from active boost tap). Add new offers here. */
+function getLimitedOfferContent(offerId: string): { title?: string; imageSrc: string; subtitle: string; description: string; buttonText: string; tab: TabType } | null {
+  switch (offerId) {
+    case 'super_seed_offer':
+      return {
+        imageSrc: assetPath('/assets/plants/plant_2.png'),
+        subtitle: 'SUPER SEED',
+        description: 'Spawn 10 seeds instantly onto the board',
+        buttonText: 'Watch Ad',
+        tab: 'SEEDS',
+      };
+    default:
+      return null;
+  }
+}
+
 /** Discovery goal frequency: every X goals show a +1 plant goal. Based on highest plant level. */
 const getDiscoveryGoalEvery = (highestPlant: number): number => {
   if (highestPlant <= 2) return 5;
@@ -261,7 +277,7 @@ export default function App() {
   // Plant info popup state (for barn)
   const [plantInfoPopup, setPlantInfoPopup] = useState<{ isVisible: boolean; level: number } | null>(null);
   // Limited offer popup state
-  const [limitedOfferPopup, setLimitedOfferPopup] = useState<{ isVisible: boolean; title?: string; imageSrc: string; subtitle: string; description: string; buttonText: string; offerId?: string; tab?: TabType } | null>(null);
+  const [limitedOfferPopup, setLimitedOfferPopup] = useState<{ isVisible: boolean; title?: string; imageSrc: string; subtitle: string; description: string; buttonText: string; offerId?: string; tab?: TabType; /** When set, popup is "active boost" view: brown button with countdown, button does nothing */ activeBoostEndTime?: number } | null>(null);
   // Rewarded offers shown in upgrade list (when player declines popup)
   const [rewardedOffers, setRewardedOffers] = useState<RewardedOffer[]>([]);
   // Barn particles for "Add to Barn" button
@@ -1905,6 +1921,17 @@ export default function App() {
                       ]);
                     }
                   }}
+                  onBoostClick={(boost) => {
+                    if (!boost.offerId) return;
+                    const content = getLimitedOfferContent(boost.offerId);
+                    if (!content) return;
+                    setLimitedOfferPopup({
+                      isVisible: true,
+                      ...content,
+                      offerId: boost.offerId,
+                      activeBoostEndTime: boost.endTime,
+                    });
+                  }}
                 />
               </div>
 
@@ -1915,7 +1942,7 @@ export default function App() {
               >
                 <div 
                   className="absolute left-0 right-0 overflow-hidden"
-                  style={{ top: -55, height: 140, paddingTop: 55 }}
+                  style={{ top: -25, height: 110, paddingTop: 25 }}
                 >
                 {[0, 1, 2, 3, 4].map((slotIdx) => {
                   const maxGoalSlots = getMaxGoalSlots(playerLevel);
@@ -2679,6 +2706,10 @@ export default function App() {
                 }}
                 closeOnButtonClick={false}
                 onCloseButtonClick={() => {
+                  if (limitedOfferPopup.activeBoostEndTime != null) {
+                    setLimitedOfferPopup(null);
+                    return;
+                  }
                   // Open upgrade panel, scroll to offer, flash yellow and keep yellow (same behaviour as unlock)
                   if (limitedOfferPopup.offerId) {
                     const offerId = limitedOfferPopup.offerId;
@@ -2698,7 +2729,6 @@ export default function App() {
                     setActiveTab(offerTab);
                     setPendingOfferHighlightId(offerId);
                     setLimitedOfferPopup(null);
-                    // Clear pending after scroll so UpgradeList effect can run once
                     setTimeout(() => setPendingOfferHighlightId(null), 2500);
                   }
                 }}
@@ -2708,6 +2738,7 @@ export default function App() {
                 description={limitedOfferPopup.description}
                 buttonText={limitedOfferPopup.buttonText}
                 appScale={appScale}
+                activeBoostEndTime={limitedOfferPopup.activeBoostEndTime}
                 onButtonClick={() => {
                   // Show fake ad; when user taps "Complete ad", grant reward and close popup
                   const offerId = limitedOfferPopup.offerId;
@@ -2984,6 +3015,7 @@ export default function App() {
                           endTime: Date.now() + durationMs,
                           durationMs,
                           icon: 'icon_seedstorage',
+                          offerId: 'super_seed_offer',
                         },
                       ];
                     });

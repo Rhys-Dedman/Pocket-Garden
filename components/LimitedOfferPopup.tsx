@@ -40,6 +40,8 @@ interface LimitedOfferPopupProps {
   imageLevel?: number;
   closeOnBackdropClick?: boolean;
   appScale?: number;
+  /** When set, show "active boost" view: brown disabled-style button with "Active: XXs" countdown; button does nothing */
+  activeBoostEndTime?: number;
 }
 
 const POPUP_LEAF_COUNT = 40;
@@ -113,6 +115,7 @@ export const LimitedOfferPopup: React.FC<LimitedOfferPopupProps> = ({
   imageLevel,
   closeOnBackdropClick = true,
   appScale = 1,
+  activeBoostEndTime,
 }) => {
   const [animState, setAnimState] = useState<'hidden' | 'entering' | 'visible' | 'leaving'>('hidden');
   const [assetsReady, setAssetsReady] = useState(false);
@@ -120,6 +123,20 @@ export const LimitedOfferPopup: React.FC<LimitedOfferPopupProps> = ({
   const [leafPositions, setLeafPositions] = useState<{ x: number; y: number; opacity: number; rotation: number; scale: number }[]>([]);
   const [imgFailed, setImgFailed] = useState<Record<number, boolean>>({});
   const [buttonPressed, setButtonPressed] = useState(false);
+  const [activeSecondsLeft, setActiveSecondsLeft] = useState<number>(0);
+  const isActiveBoostView = activeBoostEndTime != null;
+
+  // Countdown for active boost view (same as radial progress)
+  useEffect(() => {
+    if (!isActiveBoostView || !isVisible) return;
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((activeBoostEndTime - Date.now()) / 1000));
+      setActiveSecondsLeft(remaining);
+    };
+    tick();
+    const id = setInterval(tick, 500);
+    return () => clearInterval(id);
+  }, [isActiveBoostView, isVisible, activeBoostEndTime]);
   const leafRafRef = useRef<number>(0);
   const leafStartTimeRef = useRef<number>(0);
   const leafPosRef = useRef<{ x: number; y: number; vx: number; vy: number; opacity: number; rotation: number; scale: number; started: boolean }[]>([]);
@@ -234,6 +251,7 @@ export const LimitedOfferPopup: React.FC<LimitedOfferPopupProps> = ({
 
   const handleButtonClick = () => {
     if (isClosing) return;
+    if (isActiveBoostView) return; // Active boost view: button does nothing
     if (onButtonClick && buttonRef.current) {
       onButtonClick(buttonRef.current.getBoundingClientRect());
     }
@@ -255,10 +273,10 @@ export const LimitedOfferPopup: React.FC<LimitedOfferPopupProps> = ({
   // Colors for Limited Offer theme (orange/yellow)
   const subtitleColor = '#5c4a32'; // Dark brown for subtitle
   const descriptionColor = '#f59d42'; // Orange for description
-  const buttonBgColor = '#ffd856'; // Yellow button
-  const buttonBorderColor = '#f59d42'; // Orange button outline
-  const buttonTextColor = '#e6803a'; // Orange text/icon color
-  const buttonPressedBg = '#f0c840';
+  const buttonBgColor = isActiveBoostView ? '#e3c28c' : '#ffd856'; // Brown when active (same as upgrade "can't afford")
+  const buttonBorderColor = isActiveBoostView ? '#c4a574' : '#f59d42';
+  const buttonTextColor = isActiveBoostView ? '#a58854' : '#e6803a';
+  const buttonPressedBg = isActiveBoostView ? '#e3c28c' : '#f0c840';
   // Header circle gradient: top #ffd856, bottom #f17d3f, outline #bd792c
 
   return (
@@ -277,7 +295,12 @@ export const LimitedOfferPopup: React.FC<LimitedOfferPopupProps> = ({
           backgroundColor: 'rgba(0, 0, 0, 0.7)',
           opacity: isLeaving ? 0 : 1,
         }}
-        onClick={closeOnBackdropClick ? onClose : undefined}
+        onClick={closeOnBackdropClick ? () => {
+          if (onCloseButtonClick && buttonRef.current) {
+            onCloseButtonClick(buttonRef.current.getBoundingClientRect());
+          }
+          onClose();
+        } : undefined}
       />
 
       {/* Scaled content wrapper */}
@@ -492,10 +515,11 @@ export const LimitedOfferPopup: React.FC<LimitedOfferPopupProps> = ({
           {/* Spacer */}
           <div className="flex-grow min-h-[48px]" />
 
-{/* Action Button */}
+{/* Action Button - normal "Watch Ad" or active boost "Active: XXs" (non-clickable) */}
           <button
             ref={buttonRef}
-            onMouseDown={() => setButtonPressed(true)}
+            type="button"
+            onMouseDown={() => !isActiveBoostView && setButtonPressed(true)}
             onMouseUp={() => setButtonPressed(false)}
             onMouseLeave={() => setButtonPressed(false)}
             onClick={handleButtonClick}
@@ -511,29 +535,31 @@ export const LimitedOfferPopup: React.FC<LimitedOfferPopupProps> = ({
                 ? 'inset 0 4px 8px rgba(0,0,0,0.15)'
                 : '0 8px 0 ' + buttonBorderColor + ', 0 12px 24px rgba(0,0,0,0.15)',
               transform: buttonPressed ? 'translateY(4px)' : 'translateY(0)',
+              cursor: isActiveBoostView ? 'default' : 'pointer',
             }}
           >
-            {/* Watch Ad Icon */}
-            <img
-              src={assetPath('/assets/icons/icon_watchad.png')}
-              alt=""
-              style={{
-                width: '60px',
-                height: '60px',
-                objectFit: 'contain',
-                filter: 'brightness(0) saturate(100%) invert(56%) sepia(67%) saturate(1000%) hue-rotate(346deg) brightness(97%) contrast(88%)',
-              }}
-            />
+            {!isActiveBoostView && (
+              <img
+                src={assetPath('/assets/icons/icon_watchad.png')}
+                alt=""
+                style={{
+                  width: '60px',
+                  height: '60px',
+                  objectFit: 'contain',
+                  filter: 'brightness(0) saturate(100%) invert(56%) sepia(67%) saturate(1000%) hue-rotate(346deg) brightness(97%) contrast(88%)',
+                }}
+              />
+            )}
             <span
               className="font-bold tracking-tight"
               style={{
                 color: buttonTextColor,
                 fontFamily: 'Inter, sans-serif',
-                textShadow: '0 2px 0 rgba(255,255,255,0.3)',
+                textShadow: isActiveBoostView ? 'none' : '0 2px 0 rgba(255,255,255,0.3)',
                 fontSize: '2rem',
               }}
             >
-              {buttonText}
+              {isActiveBoostView ? `Active: ${activeSecondsLeft}s` : buttonText}
             </span>
           </button>
             </div>

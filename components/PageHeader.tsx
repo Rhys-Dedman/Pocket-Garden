@@ -45,6 +45,8 @@ interface PageHeaderProps {
   activeBoostMinWidthPx?: number;
   /** When a boost's timer hits 0; (id, rect) so caller can play burst at position */
   onBoostComplete?: (id: string, rect?: DOMRect) => void;
+  /** When user taps a boost: open the matching limited offer popup in "active" view (countdown, brown button) */
+  onBoostClick?: (boost: ActiveBoostData) => void;
   /** Ref for the left section wrapper (scale 0.88); used so boost particle can render inside it and hit the correct slot */
   headerLeftWrapperRef?: React.RefObject<HTMLDivElement | null>;
 }
@@ -75,6 +77,7 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   activeBoostAreaRef,
   activeBoostMinWidthPx,
   onBoostComplete,
+  onBoostClick,
   headerLeftWrapperRef,
 }) => {
   const isInteractive = !!walletRef;
@@ -160,9 +163,10 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
         <div className="relative z-10 flex justify-between items-center w-full min-h-[44px] px-3 py-2">
       <div
         ref={headerLeftWrapperRef}
-        className="relative flex items-center gap-4 min-w-0 flex-shrink-0 overflow-visible"
+        className="relative flex items-center min-w-0 flex-shrink-0 overflow-visible"
         style={{
           marginLeft: 10,
+          gap: 18,
           transform: 'scale(0.88)',
           transformOrigin: 'left center',
         }}
@@ -174,9 +178,9 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
               onClick={onWalletClick}
               className="relative inline-flex items-center justify-center rounded-full border outline-none shadow-2xl hover:opacity-90 active:scale-95 transition-all overflow-visible flex-shrink-0"
               style={{
-                width: 75,
-                minWidth: 75,
-                maxWidth: 75,
+                width: 85,
+                minWidth: 85,
+                maxWidth: 85,
                 height: 22,
                 backgroundColor: '#775041',
                 borderWidth: 1,
@@ -199,18 +203,18 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
               >
                 <img key={bounceKey} src={assetPath('/assets/icons/icon_coin.png')} alt="" className={`w-[30px] h-[30px] object-contain object-left outline-none border-0 ${bounceKey > 0 ? 'coin-bounce' : ''}`} style={{ outline: 'none', border: 'none' }} />
               </span>
-              {/* Text centered in fixed 75px width */}
+              {/* Text centered in fixed 85px width */}
               <span className="relative font-black text-xs tracking-tight text-[#fcf0c7] whitespace-nowrap truncate pl-[12px] pr-2 py-1 max-w-full">
                 {formatMoney(money)}
               </span>
             </button>
-            {/* Player level: 100px wide, icon + progress bar (overflow-visible so icon isn't masked) - fixed size */}
+            {/* Player level: 155px wide, icon + progress bar (overflow-visible so icon isn't masked) - fixed size */}
             <div
               className="relative inline-flex items-center rounded-full border flex-shrink-0 overflow-visible"
               style={{
-                width: 100,
-                minWidth: 100,
-                maxWidth: 100,
+                width: 155,
+                minWidth: 155,
+                maxWidth: 155,
                 height: 22,
                 backgroundColor: '#775041',
                 borderWidth: 1,
@@ -222,7 +226,18 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
                 <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center font-black leading-none" style={{ color: '#c8e9eb', fontSize: 12, WebkitTextStroke: '1px rgba(0,0,0,0.5)', paintOrder: 'stroke fill' }}>{playerLevel}</span>
               </span>
               {/* Progress bar: 1px padding top/right/bottom, 4px left; track #775041; fill has 1px inner stroke */}
-              <div className="flex-1 h-full flex items-stretch" style={{ paddingTop: 1, paddingRight: 1, paddingBottom: 1, paddingLeft: 10 }}>
+              <div className="flex-1 h-full flex items-stretch relative" style={{ paddingTop: 1, paddingRight: 1, paddingBottom: 1, paddingLeft: 10 }}>
+                {/* Goals count: fixed center of bar, above progress fill; cream text, black stroke 50%; same size as coin panel (text-xs) */}
+                <span
+                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none font-black text-xs leading-none z-10"
+                  style={{
+                    color: '#fcf0c7',
+                    WebkitTextStroke: '1px rgba(0,0,0,0.5)',
+                    paintOrder: 'stroke fill',
+                  }}
+                >
+                  {playerLevelProgress}/{playerLevelGoalsRequired}
+                </span>
                 <div className="w-full h-full overflow-hidden bg-[#775041]" style={{ borderRadius: '0 9999px 9999px 0' }}>
                   {/* Progress completed: 2px padding, inner 2px stroke (gradient) on top of fill */}
                   <div
@@ -272,7 +287,11 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
                 <div
                   key={boost.id}
                   ref={(el) => { boostRefs.current[boost.id] = el; }}
-                  className="absolute flex items-center justify-center boost-slide"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onBoostClick?.(boost)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onBoostClick?.(boost); } }}
+                  className="absolute flex items-center justify-center boost-slide cursor-pointer"
                   style={{
                     left: index * BOOST_SLOT_WIDTH,
                     top: 0,
