@@ -23,6 +23,8 @@ import { LimitedOfferPopup } from './components/LimitedOfferPopup';
 import { FakeAdPopup } from './components/FakeAdPopup';
 import { PauseMenuPopup } from './components/PauseMenuPopup';
 import { BarnParticle, BarnParticleData } from './components/BarnParticle';
+import { BoostParticle, BoostParticleData } from './components/BoostParticle';
+import { ActiveBoostData, ACTIVE_BOOST_INDICATOR_SIZE_PX } from './components/ActiveBoostIndicator';
 import { UpgradeTabsRef } from './components/UpgradeTabs';
 import { ButtonLeafBurst } from './components/ButtonLeafBurst';
 import { LoadingScreen } from './components/LoadingScreen';
@@ -264,6 +266,12 @@ export default function App() {
   const [rewardedOffers, setRewardedOffers] = useState<RewardedOffer[]>([]);
   // Barn particles for "Add to Barn" button
   const [barnParticles, setBarnParticles] = useState<BarnParticleData[]>([]);
+  // Active rewarded-ad boosts (max 5); each has endTime and duration for radial countdown
+  const [activeBoosts, setActiveBoosts] = useState<ActiveBoostData[]>([]);
+  const [boostParticles, setBoostParticles] = useState<BoostParticleData[]>([]);
+  const [boostBursts, setBoostBursts] = useState<{ id: string; x: number; y: number; startTime: number }[]>([]);
+  const activeBoostAreaRef = useRef<HTMLDivElement>(null);
+  const headerLeftWrapperRef = useRef<HTMLDivElement>(null);
   // When user closes limited offer (X): open panel, scroll to offer, flash yellow then return to light yellow
   const [pendingOfferHighlightId, setPendingOfferHighlightId] = useState<string | null>(null);
   // Pause menu (opened from settings/gear button)
@@ -1879,6 +1887,24 @@ export default function App() {
                     buttonText: 'Watch Ad',
                   })}
                   onPauseClick={() => setPauseMenuOpen(true)}
+                  activeBoosts={activeBoosts}
+                  activeBoostAreaRef={activeBoostAreaRef}
+                  activeBoostMinWidthPx={ACTIVE_BOOST_INDICATOR_SIZE_PX}
+                  headerLeftWrapperRef={headerLeftWrapperRef}
+                  onBoostComplete={(id, rect) => {
+                    setActiveBoosts((prev) => prev.filter((b) => b.id !== id));
+                    if (rect) {
+                      setBoostBursts((prev) => [
+                        ...prev,
+                        {
+                          id: `boost-burst-${Date.now()}`,
+                          x: rect.left + rect.width / 2,
+                          y: rect.top + rect.height / 2,
+                          startTime: Date.now(),
+                        },
+                      ]);
+                    }
+                  }}
                 />
               </div>
 
@@ -2513,6 +2539,20 @@ export default function App() {
                 onComplete={() => setGoalCoinLeafBursts((prev) => prev.filter((x) => x.id !== b.id))}
               />
             ))}
+            {boostBursts.map((b) => (
+              <LeafBurst
+                key={b.id}
+                x={b.x}
+                y={b.y}
+                startTime={b.startTime}
+                particleCount={LEAF_BURST_SMALL_COUNT}
+                appScale={appScale}
+                spriteVariant="gold"
+                burstScale={0.5}
+                useCircle
+                onComplete={() => setBoostBursts((prev) => prev.filter((x) => x.id !== b.id))}
+              />
+            ))}
             {cellHighlightBeams.map((b) => (
               <CellHighlightBeam
                 key={b.id}
@@ -2687,6 +2727,22 @@ export default function App() {
             <FakeAdPopup
               isVisible={showFakeAd}
               appScale={appScale}
+              onActivateRewardClick={(buttonRect) => {
+                const wrapper = headerLeftWrapperRef.current;
+                if (!wrapper) return;
+                const wr = wrapper.getBoundingClientRect();
+                const scale = wr.width / wrapper.offsetWidth;
+                const targetSlotIndex = activeBoosts.length;
+                setBoostParticles((prev) => [
+                  ...prev,
+                  {
+                    id: `boost-${Date.now()}`,
+                    startX: (buttonRect.left + buttonRect.width / 2 - wr.left) / scale,
+                    startY: (buttonRect.top + buttonRect.height / 2 - wr.top) / scale,
+                    targetSlotIndex,
+                  },
+                ]);
+              }}
               onComplete={() => {
                 pendingAdComplete?.();
                 setPendingAdComplete(null);
@@ -2889,6 +2945,54 @@ export default function App() {
               onComplete={() => setBarnParticles(prev => prev.filter(p => p.id !== particle.id))}
             />
           ))}
+
+          {/* Boost particles: rendered inside header left wrapper via portal so they use the same coordinate system and always hit the slot */}
+          {headerLeftWrapperRef.current &&
+            createPortal(
+              boostParticles.map((particle) => (
+                <BoostParticle
+                  key={particle.id}
+                  data={particle}
+                  containerRef={headerLeftWrapperRef}
+                  boostAreaRef={activeBoostAreaRef}
+                  onImpact={() => {
+                    const wrapper = headerLeftWrapperRef.current;
+                    const el = activeBoostAreaRef.current;
+                    if (wrapper && el) {
+                      const wr = wrapper.getBoundingClientRect();
+                      const scale = wr.width / wrapper.offsetWidth;
+                      const slotIndex = particle.targetSlotIndex ?? 0;
+                      const tx = el.offsetLeft + slotIndex * 28 + 13;
+                      const ty = el.offsetTop + 11;
+                      setBoostBursts((prev) => [
+                        ...prev,
+                        {
+                          id: `boost-impact-${Date.now()}`,
+                          x: wr.left + tx * scale,
+                          y: wr.top + ty * scale,
+                          startTime: Date.now(),
+                        },
+                      ]);
+                    }
+                    setActiveBoosts((prev) => {
+                      if (prev.length >= 5) return prev;
+                      const durationMs = 60000;
+                      return [
+                        ...prev,
+                        {
+                          id: `boost-${Date.now()}`,
+                          endTime: Date.now() + durationMs,
+                          durationMs,
+                          icon: 'icon_seedstorage',
+                        },
+                      ];
+                    });
+                  }}
+                  onComplete={() => setBoostParticles((prev) => prev.filter((p) => p.id !== particle.id))}
+                />
+              )),
+              headerLeftWrapperRef.current
+            )}
 
         </div>
 
