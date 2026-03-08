@@ -32,6 +32,8 @@ interface LimitedOfferPopupProps {
   description: string;
   buttonText: string;
   onButtonClick?: (buttonRect: DOMRect) => void;
+  /** If false, button click only calls onButtonClick and does not close the popup (e.g. parent shows fake ad then closes) */
+  closeOnButtonClick?: boolean;
   /** Called when X close button is clicked, with the accept button rect for particle origin */
   onCloseButtonClick?: (acceptButtonRect: DOMRect) => void;
   showCloseButton?: boolean;
@@ -105,6 +107,7 @@ export const LimitedOfferPopup: React.FC<LimitedOfferPopupProps> = ({
   description,
   buttonText,
   onButtonClick,
+  closeOnButtonClick = true,
   onCloseButtonClick,
   showCloseButton = true,
   imageLevel,
@@ -231,16 +234,17 @@ export const LimitedOfferPopup: React.FC<LimitedOfferPopupProps> = ({
 
   const handleButtonClick = () => {
     if (isClosing) return;
-    setIsClosing(true);
     if (onButtonClick && buttonRef.current) {
       onButtonClick(buttonRef.current.getBoundingClientRect());
     }
-    // Trigger leave animation
-    setAnimState('leaving');
-    setTimeout(() => {
-      setAnimState('hidden');
-      onClose();
-    }, 150);
+    if (closeOnButtonClick) {
+      setIsClosing(true);
+      setAnimState('leaving');
+      setTimeout(() => {
+        setAnimState('hidden');
+        onClose();
+      }, 150);
+    }
   };
 
   if (animState === 'hidden') return null;

@@ -101,12 +101,16 @@ interface UpgradeListProps {
   highestPlantEver?: number;
   /** Rewarded offers to display at top of relevant tabs */
   rewardedOffers?: RewardedOffer[];
-  /** Called when a rewarded offer button is clicked */
+  /** Called when the rewarded offer panel (not the button) is clicked - e.g. reopen limited offer popup */
+  onRewardedOfferPanelClick?: (offerId: string) => void;
+  /** Called when the Watch Ad button is clicked - e.g. open fake ad directly (skip popup) */
   onRewardedOfferClick?: (offerId: string) => void;
   /** Player level (for Seeds tab upgrade locking) */
   playerLevel?: number;
   /** When set, scroll to this upgrade and flash it blue (from level-up Unlock Now) */
   pendingUnlockUpgradeId?: string | null;
+  /** When set (e.g. after declining limited offer), scroll to this offer and flash yellow, then return to light yellow */
+  pendingOfferHighlightId?: string | null;
   /** When true, panel is expanded (use stronger ease-out for opening) */
   isExpanded?: boolean;
 }
@@ -411,7 +415,7 @@ export const createInitialHarvestState = (): Record<string, UpgradeState> => ({
   happy_customer: { level: 0, progress: 0 },
 });
 
-export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange, money, setMoney, seedsState: propsSeedsState, setSeedsState: propsSetSeedsState, harvestState: propsHarvestState, setHarvestState: propsSetHarvestState, cropsState: propsCropsState, setCropsState: propsSetCropsState, lockedCellCount = 0, onUnlockCell, fertilizableCellCount = 0, onFertilizeCell, highestPlantEver = 1, rewardedOffers = [], onRewardedOfferClick, playerLevel = 1, pendingUnlockUpgradeId = null, isExpanded = false }) => {
+export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange, money, setMoney, seedsState: propsSeedsState, setSeedsState: propsSetSeedsState, harvestState: propsHarvestState, setHarvestState: propsSetHarvestState, cropsState: propsCropsState, setCropsState: propsSetCropsState, lockedCellCount = 0, onUnlockCell, fertilizableCellCount = 0, onFertilizeCell, highestPlantEver = 1, rewardedOffers = [], onRewardedOfferPanelClick, onRewardedOfferClick, playerLevel = 1, pendingUnlockUpgradeId = null, pendingOfferHighlightId = null, isExpanded = false }) => {
   const [internalSeedsState, setInternalSeedsState] = useState<Record<string, UpgradeState>>(createInitialSeedsState);
   const seedsState = propsSeedsState ?? internalSeedsState;
   const setSeedsState = propsSetSeedsState ?? setInternalSeedsState;
@@ -426,6 +430,9 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
   const [unlockFlashIds, setUnlockFlashIds] = useState<Set<string>>(new Set());
   const [completedUnlockFlashIds, setCompletedUnlockFlashIds] = useState<Set<string>>(new Set());
   const upgradeRowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const offerRowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  /** Temporary yellow flash for offer card when scroll lands (then returns to light yellow) */
+  const [offerFlashIds, setOfferFlashIds] = useState<Set<string>>(new Set());
 
   const scrollRefs = {
     SEEDS: useRef<HTMLDivElement>(null),
@@ -530,6 +537,75 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
     };
   }, [pendingUnlockUpgradeId, activeTab, isExpanded]);
 
+  // Scroll to offered card when user closed limited offer (X) - same timing as unlock; flash yellow when scroll lands, then return to light yellow
+  const OFFER_FLASH_DURATION_MS = 600;
+  useEffect(() => {
+    if (!pendingOfferHighlightId || !isExpanded) return;
+
+    const TAB_SLIDE_MS = 700;
+    const SCROLL_DURATION_MS = 800;
+    let scrollRafId: number | null = null;
+    let flashTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+    const offerId = pendingOfferHighlightId;
+
+    const scrollT = setTimeout(() => {
+      const el = offerRowRefs.current[offerId];
+      const scrollContainer = (scrollRefs as Record<string, React.RefObject<HTMLDivElement | null>>)[activeTab]?.current;
+      if (el && scrollContainer) {
+        const containerRect = scrollContainer.getBoundingClientRect();
+        const elRect = el.getBoundingClientRect();
+        const offsetTop = elRect.top - containerRect.top + scrollContainer.scrollTop;
+        const elHeight = elRect.height;
+        const containerHeight = scrollContainer.clientHeight;
+        const maxScroll = scrollContainer.scrollHeight - containerHeight;
+        const centerTarget = offsetTop - (containerHeight / 2) + (elHeight / 2);
+        const scrollTarget = Math.max(0, Math.min(maxScroll, centerTarget));
+        const startTop = scrollContainer.scrollTop;
+        const distance = scrollTarget - startTop;
+        const startTime = Date.now();
+
+        const animate = () => {
+          const elapsed = Date.now() - startTime;
+          const progress = Math.min(1, elapsed / SCROLL_DURATION_MS);
+          const eased = easeOutCubic(progress);
+          scrollContainer.scrollTop = startTop + distance * eased;
+          if (progress < 1) {
+            scrollRafId = requestAnimationFrame(animate);
+          } else {
+            // Scroll complete: flash yellow, then clear after duration (return to light yellow)
+            setOfferFlashIds(prev => new Set(prev).add(offerId));
+            flashTimeoutId = setTimeout(() => {
+              setOfferFlashIds(prev => {
+                const next = new Set(prev);
+                next.delete(offerId);
+                return next;
+              });
+            }, OFFER_FLASH_DURATION_MS);
+          }
+        };
+        if (Math.abs(distance) > 2) {
+          scrollRafId = requestAnimationFrame(animate);
+        } else {
+          setOfferFlashIds(prev => new Set(prev).add(offerId));
+          flashTimeoutId = setTimeout(() => {
+            setOfferFlashIds(prev => {
+              const next = new Set(prev);
+              next.delete(offerId);
+              return next;
+            });
+          }, OFFER_FLASH_DURATION_MS);
+        }
+      }
+    }, TAB_SLIDE_MS);
+
+    return () => {
+      clearTimeout(scrollT);
+      if (flashTimeoutId) clearTimeout(flashTimeoutId);
+      if (scrollRafId) cancelAnimationFrame(scrollRafId);
+    };
+  }, [pendingOfferHighlightId, activeTab, isExpanded]);
+
   useEffect(() => {
     const cleanups: (() => void)[] = [];
     TABS.forEach((cat) => {
@@ -615,8 +691,9 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
 
       const handlePointerDown = (e: PointerEvent) => {
         if (e.button !== 0 && e.pointerType === 'mouse') return;
-        // Don't capture when tapping buttons - allows upgrade/rewarded-offer clicks to work
+        // Don't capture when tapping buttons or the rewarded-offer panel (so panel click opens popup)
         if ((e.target as Element).closest?.('button')) return;
+        if ((e.target as Element).closest?.('[data-rewarded-offer-panel]')) return;
         isDown = true;
         directionLocked = 'none';
         velocityV = 0;
@@ -690,10 +767,23 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
       return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     };
 
+    // Light yellow default (#fde8a1); full yellow only during temporary flash when scroll lands
+    const isFlashingYellow = offerFlashIds.has(offer.id);
+
     return (
       <div 
-        key={offer.id} 
-        className="relative flex flex-col transition-all duration-300 border-2 bg-[#fde8a1] shadow-[0_2px_10px_rgba(0,0,0,0.03)] border-[#fbc682] rounded-[11px]"
+        key={offer.id}
+        ref={(el) => { offerRowRefs.current[offer.id] = el; }}
+        data-rewarded-offer-panel
+        role="button"
+        tabIndex={0}
+        onClick={() => onRewardedOfferPanelClick?.(offer.id)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onRewardedOfferPanelClick?.(offer.id); } }}
+        className="relative flex flex-col transition-all duration-300 border-2 shadow-[0_2px_10px_rgba(0,0,0,0.03)] rounded-[11px] cursor-pointer active:opacity-95"
+        style={{
+          backgroundColor: isFlashingYellow ? '#ffd54f' : '#fde8a1',
+          borderColor: isFlashingYellow ? '#f9a825' : '#fbc682',
+        }}
       >
         <div className="flex items-center p-1.5 px-3">
           {/* Square Icon Box */}
@@ -716,9 +806,13 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
             </div>
           </div>
 
-          {/* Watch Ad Button with timer - 1.2x wider than normal buttons */}
+          {/* Watch Ad Button - opens fake ad directly (stopPropagation so panel click doesn't fire) */}
           <button 
-            onClick={() => onRewardedOfferClick?.(offer.id)}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRewardedOfferClick?.(offer.id);
+            }}
             className="relative flex items-center min-w-[84px] h-8 transition-all border outline outline-1 active:translate-y-[2px] active:border-b-0 active:mb-[4px] rounded-[8px] shadow-[inset_0_1px_1px_rgba(255,255,255,0.4)]"
             style={{
               backgroundColor: '#ffd856',

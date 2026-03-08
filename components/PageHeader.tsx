@@ -27,6 +27,8 @@ interface PageHeaderProps {
   hideTopBarBg?: boolean;
   /** When provided, shows a + button that grants 1 goal worth of XP on tap */
   onXpBoostClick?: () => void;
+  /** When provided, settings (gear) button opens pause menu */
+  onPauseClick?: () => void;
 }
 
 const formatMoney = (amount: number): string => {
@@ -50,6 +52,7 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   playerLevelGoalsRequired = 2,
   hideTopBarBg = false,
   onXpBoostClick,
+  onPauseClick,
 }) => {
   const isInteractive = !!walletRef;
   const prevBurstRef = useRef(walletBurstCount);
@@ -215,21 +218,6 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
                 </div>
               </div>
             </div>
-            {/* XP Boost + button - to the right of player level */}
-            {onXpBoostClick && (
-              <button
-                onClick={onXpBoostClick}
-                className="flex-shrink-0 w-[22px] h-[22px] flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-all"
-                style={{
-                  backgroundColor: '#775041',
-                  borderWidth: 1,
-                  borderColor: '#e9dcaf',
-                }}
-                aria-label="Add XP"
-              >
-                <span className="text-white font-bold leading-none" style={{ fontSize: 16 }}>+</span>
-              </button>
-            )}
           </>
         ) : plantWallet ? (
           <div className="relative flex items-center gap-1 bg-black/50 backdrop-blur-md pl-1 pr-2 py-1 rounded-full border-0 shadow-2xl overflow-hidden -ml-4">
@@ -274,27 +262,22 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
       </div>
 
       <div className="flex items-center gap-2">
-        {onGiftClick && (
-          <button
-            onClick={onGiftClick}
-            className="flex items-center justify-center transition-all active:scale-95 rounded-lg flex-shrink-0"
-            style={{
-              width: '18px',
-              height: '18px',
-              background: 'linear-gradient(180deg, #FFB347 0%, #FF9500 100%)',
-              border: '1px solid #E88A00',
-              boxShadow: '0 1px 2px rgba(0, 0, 0, 0.2)',
-            }}
-          >
-            <span style={{ fontSize: '9px' }}>🎁</span>
-          </button>
-        )}
-        <button className="w-9 h-9 flex items-center justify-center bg-black/50 backdrop-blur-md hover:bg-black/60 rounded-full transition-all border border-white/5 shadow-2xl">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5 text-white/80">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
-      </button>
+        <button
+          onClick={onPauseClick}
+          className="flex items-center justify-center rounded-full transition-all active:scale-95 flex-shrink-0"
+          style={{
+            width: '22px',
+            height: '22px',
+            backgroundColor: '#775041',
+            borderWidth: 1,
+            borderColor: '#e9dcaf',
+          }}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="#fcf0c7" className="w-3.5 h-3.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        </button>
       </div>
         </div>
       </div>

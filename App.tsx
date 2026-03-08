@@ -20,8 +20,9 @@ import { DiscoveryPopup } from './components/DiscoveryPopup';
 import { LevelUpPopup } from './components/LevelUpPopup';
 import { PlantInfoPopup } from './components/PlantInfoPopup';
 import { LimitedOfferPopup } from './components/LimitedOfferPopup';
+import { FakeAdPopup } from './components/FakeAdPopup';
+import { PauseMenuPopup } from './components/PauseMenuPopup';
 import { BarnParticle, BarnParticleData } from './components/BarnParticle';
-import { OfferParticle, OfferParticleData } from './components/OfferParticle';
 import { UpgradeTabsRef } from './components/UpgradeTabs';
 import { ButtonLeafBurst } from './components/ButtonLeafBurst';
 import { LoadingScreen } from './components/LoadingScreen';
@@ -258,13 +259,18 @@ export default function App() {
   // Plant info popup state (for barn)
   const [plantInfoPopup, setPlantInfoPopup] = useState<{ isVisible: boolean; level: number } | null>(null);
   // Limited offer popup state
-  const [limitedOfferPopup, setLimitedOfferPopup] = useState<{ isVisible: boolean; title?: string; imageSrc: string; subtitle: string; description: string; buttonText: string; offerId?: string } | null>(null);
+  const [limitedOfferPopup, setLimitedOfferPopup] = useState<{ isVisible: boolean; title?: string; imageSrc: string; subtitle: string; description: string; buttonText: string; offerId?: string; tab?: TabType } | null>(null);
   // Rewarded offers shown in upgrade list (when player declines popup)
   const [rewardedOffers, setRewardedOffers] = useState<RewardedOffer[]>([]);
   // Barn particles for "Add to Barn" button
   const [barnParticles, setBarnParticles] = useState<BarnParticleData[]>([]);
-  // Offer particles for limited offer decline (fly to tab)
-  const [offerParticles, setOfferParticles] = useState<(OfferParticleData & { tab: TabType; offerData: { id: string; name: string; description: string } })[]>([]);
+  // When user closes limited offer (X): open panel, scroll to offer, flash yellow then return to light yellow
+  const [pendingOfferHighlightId, setPendingOfferHighlightId] = useState<string | null>(null);
+  // Pause menu (opened from settings/gear button)
+  const [pauseMenuOpen, setPauseMenuOpen] = useState(false);
+  // Fake ad popup: show full-screen "ad", on Complete ad run callback then close
+  const [showFakeAd, setShowFakeAd] = useState(false);
+  const [pendingAdComplete, setPendingAdComplete] = useState<(() => void) | null>(null);
   // Ref for upgrade tabs to get tab element positions
   const upgradeTabsRef = useRef<UpgradeTabsRef>(null);
   // Barn notification state - shows when a new plant is added to barn
@@ -430,9 +436,8 @@ export default function App() {
   const scaleX = viewportWidth / baseWidth;
   const scaleY = availableHeight / baseHeight;
   const fitScale = Math.min(scaleX, scaleY);
-  // Desktop (wide viewport): cap at 1 so game stays 448×796, 9:16 at 100%
-  // Mobile (narrow): scale to fit - prioritizes correct width (no horizontal overflow); may have black bar at bottom on tall phones
-  const appScale = viewportWidth >= mobileBreakpoint ? Math.min(fitScale, 1) : fitScale;
+  // Same as splash: scale to fit viewport (height or width). Wide browser = fill height, pillarbox on sides.
+  const appScale = fitScale;
   const appScaleRef = useRef(appScale);
   appScaleRef.current = appScale;
   
@@ -1867,11 +1872,13 @@ export default function App() {
                   onGiftClick={() => setLimitedOfferPopup({
                     isVisible: true,
                     offerId: 'super_seed_offer',
+                    tab: 'SEEDS',
                     imageSrc: assetPath('/assets/plants/plant_2.png'),
                     subtitle: 'SUPER SEED',
                     description: 'Spawn 10 seeds instantly onto the board',
-                    buttonText: 'Accept Offer',
+                    buttonText: 'Watch Ad',
                   })}
+                  onPauseClick={() => setPauseMenuOpen(true)}
                 />
               </div>
 
@@ -2264,20 +2271,30 @@ export default function App() {
                     rewardedOffers={rewardedOffers}
                     playerLevel={playerLevel}
                     pendingUnlockUpgradeId={pendingUnlockUpgradeId}
+                    pendingOfferHighlightId={pendingOfferHighlightId}
                     isExpanded={isExpanded}
-                    onRewardedOfferClick={(offerId) => {
-                      // Find the offer and show the popup
+                    onRewardedOfferPanelClick={(offerId) => {
+                      // Tap on panel: reopen the limited offer popup
                       const offer = rewardedOffers.find(o => o.id === offerId);
                       if (offer) {
                         setLimitedOfferPopup({
                           isVisible: true,
                           offerId: offer.id,
+                          tab: offer.tab,
                           imageSrc: assetPath('/assets/plants/plant_2.png'),
                           subtitle: offer.name,
                           description: offer.description,
                           buttonText: 'Watch Ad',
                         });
                       }
+                    }}
+                    onRewardedOfferClick={(offerId) => {
+                      // Tap on Watch Ad button: open fake ad directly (skip popup), grant reward on Activate Reward
+                      setShowFakeAd(true);
+                      setPendingAdComplete(() => () => {
+                        setRewardedOffers(prev => prev.filter(o => o.id !== offerId));
+                        setShowFakeAd(false);
+                      });
                     }}
                   />
                 </div>
@@ -2416,7 +2433,7 @@ export default function App() {
               {/* Shed Header - overlay on top (no top bar bg, just plant wallet + settings) */}
               <div className="absolute top-0 left-0 right-0 z-50 pointer-events-none">
                 <div className="pointer-events-auto">
-                  <PageHeader money={money} walletFlashActive={walletFlashActive} plantWallet={{ unlockedCount: highestPlantEver, totalCount: 24 }} hideTopBarBg />
+                  <PageHeader money={money} walletFlashActive={walletFlashActive} plantWallet={{ unlockedCount: highestPlantEver, totalCount: 24 }} hideTopBarBg onPauseClick={() => setPauseMenuOpen(true)} />
                 </div>
               </div>
             </div>
@@ -2620,31 +2637,29 @@ export default function App() {
                 onClose={() => {
                   setLimitedOfferPopup(null);
                 }}
+                closeOnButtonClick={false}
                 onCloseButtonClick={() => {
-                  // Fire particle from above the tab, falling down to it
+                  // Open upgrade panel, scroll to offer, flash yellow and keep yellow (same behaviour as unlock)
                   if (limitedOfferPopup.offerId) {
-                    const container = containerRef.current;
-                    const offerTab: TabType = 'SEEDS';
-                    const tabEl = upgradeTabsRef.current?.getTabRef(offerTab);
-                    if (container && tabEl) {
-                      const scale = appScaleRef.current;
-                      const containerRect = container.getBoundingClientRect();
-                      const tabRect = tabEl.getBoundingClientRect();
-                      // Spawn above the tab text
-                      const startX = (tabRect.left + tabRect.width / 2 - containerRect.left) / scale;
-                      const startY = (tabRect.top - 80 - containerRect.top) / scale;
-                      setOfferParticles(prev => [...prev, {
-                        id: `offer-${Date.now()}`,
-                        startX,
-                        startY,
+                    const offerId = limitedOfferPopup.offerId;
+                    const offerTab = limitedOfferPopup.tab ?? 'SEEDS';
+                    setRewardedOffers(prev => {
+                      if (prev.some(o => o.id === offerId)) return prev;
+                      return [...prev, {
+                        id: offerId,
+                        name: limitedOfferPopup.subtitle,
+                        icon: '📦',
+                        description: limitedOfferPopup.description,
                         tab: offerTab,
-                        offerData: {
-                          id: limitedOfferPopup.offerId!,
-                          name: limitedOfferPopup.subtitle,
-                          description: limitedOfferPopup.description,
-                        },
-                      }]);
-                    }
+                        timeRemaining: 60,
+                      }];
+                    });
+                    setIsExpanded(true);
+                    setActiveTab(offerTab);
+                    setPendingOfferHighlightId(offerId);
+                    setLimitedOfferPopup(null);
+                    // Clear pending after scroll so UpgradeList effect can run once
+                    setTimeout(() => setPendingOfferHighlightId(null), 2500);
                   }
                 }}
                 title={limitedOfferPopup.title}
@@ -2654,15 +2669,72 @@ export default function App() {
                 buttonText={limitedOfferPopup.buttonText}
                 appScale={appScale}
                 onButtonClick={() => {
-                  console.log('Limited offer accepted!');
-                  // Remove from rewarded offers if it was there
-                  if (limitedOfferPopup.offerId) {
-                    setRewardedOffers(prev => prev.filter(o => o.id !== limitedOfferPopup.offerId));
-                  }
-                  setLimitedOfferPopup(null);
+                  // Show fake ad; when user taps "Complete ad", grant reward and close popup
+                  const offerId = limitedOfferPopup.offerId;
+                  setShowFakeAd(true);
+                  setPendingAdComplete(() => () => {
+                    if (offerId) {
+                      setRewardedOffers(prev => prev.filter(o => o.id !== offerId));
+                    }
+                    setLimitedOfferPopup(null);
+                    setShowFakeAd(false);
+                  });
                 }}
               />
             )}
+
+            {/* Fake Ad - constrained to game area (same size as game); Complete ad runs pendingAdComplete then closes */}
+            <FakeAdPopup
+              isVisible={showFakeAd}
+              appScale={appScale}
+              onComplete={() => {
+                pendingAdComplete?.();
+                setPendingAdComplete(null);
+                setShowFakeAd(false);
+              }}
+            />
+
+            {/* Pause Menu - opened from settings/gear; Rewarded Ad = gift offer + close, Level Up = +1 goal XP (does not close) */}
+            <PauseMenuPopup
+              isVisible={pauseMenuOpen}
+              onClose={() => setPauseMenuOpen(false)}
+              onRewardedAdClick={() => {
+                setLimitedOfferPopup({
+                  isVisible: true,
+                  offerId: 'super_seed_offer',
+                  tab: 'SEEDS',
+                  imageSrc: assetPath('/assets/plants/plant_2.png'),
+                  subtitle: 'SUPER SEED',
+                  description: 'Spawn 10 seeds instantly onto the board',
+                  buttonText: 'Watch Ad',
+                });
+              }}
+              onLevelUpClick={() => {
+                setPlayerLevelProgress((prev) => {
+                  const next = prev + 1;
+                  const goalsRequired = getGoalsRequiredForLevel(playerLevel);
+                  if (next >= goalsRequired) {
+                    if (!levelUpGuardRef.current) {
+                      levelUpGuardRef.current = true;
+                      const nextLevel = playerLevel + 1;
+                      if (nextLevel <= 12) {
+                        setLevelUpPopup({ isVisible: true, level: nextLevel });
+                      } else {
+                        setPlayerLevel((l) => l + 1);
+                        setTimeout(() => { levelUpGuardRef.current = false; }, 0);
+                        return 0;
+                      }
+                      setTimeout(() => { levelUpGuardRef.current = false; }, 0);
+                    }
+                    return goalsRequired;
+                  }
+                  return next;
+                });
+                setPlayerLevelFlashTrigger((t) => t + 1);
+              }}
+              closeOnBackdropClick
+              appScale={appScale}
+            />
           </div>,
           document.body
         )}
@@ -2818,34 +2890,6 @@ export default function App() {
             />
           ))}
 
-          {/* Offer Particles (fall down to upgrade tab) */}
-          {offerParticles.map((particle) => {
-            const tabRef = { current: upgradeTabsRef.current?.getTabRef(particle.tab) ?? null };
-            return (
-              <OfferParticle
-                key={particle.id}
-                data={particle}
-                containerRef={containerRef}
-                targetRef={tabRef}
-                appScale={appScale}
-                onImpact={() => {
-                  // Add to rewarded offers on particle impact
-                  setRewardedOffers(prev => {
-                    if (prev.some(o => o.id === particle.offerData.id)) return prev;
-                    return [...prev, {
-                      id: particle.offerData.id,
-                      name: particle.offerData.name,
-                      icon: '📦',
-                      description: particle.offerData.description,
-                      tab: particle.tab,
-                      timeRemaining: 60,
-                    }];
-                  });
-                }}
-                onComplete={() => setOfferParticles(prev => prev.filter(p => p.id !== particle.id))}
-              />
-            );
-          })}
         </div>
 
       </div>
