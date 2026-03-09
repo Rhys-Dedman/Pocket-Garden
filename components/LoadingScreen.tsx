@@ -9,8 +9,10 @@ const DESIGN_WIDTH = 448;
 const DESIGN_HEIGHT = 796;
 
 const ASSETS_TO_PRELOAD = [
-  // Plants
+  // Plants (discovery + grid)
   ...Array.from({ length: 25 }, (_, i) => `/assets/plants/plant_${i}.png`),
+  // Goal icons (orders – preload all so new goals don’t load images on demand)
+  ...Array.from({ length: 24 }, (_, i) => `/assets/icons/icons_goals/icon_goal_${i + 1}.png`),
   // Icons
   '/assets/icons/icon_barn.png',
   '/assets/icons/icon_farm.png',
@@ -18,6 +20,12 @@ const ASSETS_TO_PRELOAD = [
   '/assets/icons/icon_coin.png',
   '/assets/icons/icon_harvest.png',
   '/assets/icons/icon_watchad.png',
+  '/assets/icons/icon_watchad_large.png',
+  '/assets/icons/icon_coin_watchad.png',
+  '/assets/icons/icon_logo.png',
+  '/assets/icons/icon_level.png',
+  '/assets/icons/icon_lock.png',
+  '/assets/icons/icon_seedstorm.png',
   '/assets/icons/icon_seedproduction.png',
   '/assets/icons/icon_seedquality.png',
   '/assets/icons/icon_seedstorage.png',
@@ -34,6 +42,11 @@ const ASSETS_TO_PRELOAD = [
   '/assets/icons/icon_cropsynergy.png',
   '/assets/icons/icon_luckyharvest.png',
   '/assets/icons/icon_limitedoffer_harvestspeed.png',
+  '/assets/icons/icon_customerspeed.png',
+  '/assets/icons/icon_marketvalue.png',
+  '/assets/icons/icon_surplussales.png',
+  '/assets/icons/icon_happycustomer.png',
+  '/assets/icons/icon_premiumorders.png',
   // Hex cells
   '/assets/hex/hexcell_green.png',
   '/assets/hex/hexcell_locked.png',
@@ -42,21 +55,37 @@ const ASSETS_TO_PRELOAD = [
   // Backgrounds
   '/assets/background/background_barn.png',
   '/assets/background/background_loading.png',
+  '/assets/background/background_grass.png',
+  // Top UI
+  '/assets/topui/topui_bg.png',
+  '/assets/topui/topui_gradient.png',
   // Barn
   '/assets/barn/barn_shelf.png',
   '/assets/barn/barn_roof.png',
   '/assets/barn/barn_tools.png',
+  // Goal slot sprites
+  '/assets/goals/goal_shadow.png',
+  '/assets/goals/goal_loading.png',
+  '/assets/goals/goal_green.png',
+  '/assets/goals/goal_yellow.png',
+  '/assets/goals/goal_lightgreen.png',
+  '/assets/goals/goal_cream.png',
+  '/assets/goals/goal_white.png',
   // Popups
   '/assets/popups/popup_background.png',
   '/assets/popups/popup_header.png',
   '/assets/popups/popup_header_yellow.png',
+  '/assets/popups/popup_header_blue.png',
   '/assets/popups/popup_divider.png',
   '/assets/popups/popup_divider_yellow.png',
-  // VFX
+  '/assets/popups/popup_divider_blue.png',
+  // VFX (all leaf variants for popups + bursts)
   '/assets/vfx/particle_leaf_1.png',
   '/assets/vfx/particle_leaf_2.png',
   '/assets/vfx/particle_leaf_3.png',
   '/assets/vfx/particle_leaf_4.png',
+  '/assets/vfx/particle_leaf_5.png',
+  '/assets/vfx/particle_leaf_6.png',
 ];
 
 export const LoadingScreen: React.FC<LoadingScreenProps> = ({ onLoadComplete }) => {

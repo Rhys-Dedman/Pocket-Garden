@@ -86,6 +86,25 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   const prevFlashRef = useRef(playerLevelFlashTrigger);
   const [bounceKey, setBounceKey] = useState(0);
   const [progressBarFlash, setProgressBarFlash] = useState(false);
+  const [fps, setFps] = useState(0);
+  const frameCountRef = useRef(0);
+  const lastFpsTimeRef = useRef(performance.now());
+  useEffect(() => {
+    let rafId: number;
+    const tick = () => {
+      frameCountRef.current += 1;
+      const now = performance.now();
+      const elapsed = now - lastFpsTimeRef.current;
+      if (elapsed >= 1000) {
+        setFps(Math.round((frameCountRef.current * 1000) / elapsed));
+        frameCountRef.current = 0;
+        lastFpsTimeRef.current = now;
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, []);
   useEffect(() => {
     if (walletBurstCount > prevBurstRef.current) {
       setBounceKey((k) => k + 1);
@@ -354,6 +373,13 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
       </div>
 
       <div className="flex items-center gap-2 flex-shrink-0">
+        <span
+          className="tabular-nums text-[10px] font-semibold select-none"
+          style={{ color: '#c4a574' }}
+          aria-label={`${fps} FPS`}
+        >
+          {fps} FPS
+        </span>
         <button
           onClick={onPauseClick}
           className="flex items-center justify-center rounded-full transition-all active:scale-95 flex-shrink-0"
