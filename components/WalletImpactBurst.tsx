@@ -38,6 +38,9 @@ export const WalletImpactBurst: React.FC<WalletImpactBurstProps> = ({
   const prevTriggerRef = useRef(0);
   const completedRef = useRef(false);
   const onCompleteRef = useRef(onComplete);
+  const particleContainerRef = useRef<HTMLDivElement>(null);
+  const particlesRef = useRef<Array<Particle & { x: number; y: number; opacity: number; scale: number }>>([]);
+  particlesRef.current = particles;
   onCompleteRef.current = onComplete;
 
   useEffect(() => {
@@ -86,17 +89,21 @@ export const WalletImpactBurst: React.FC<WalletImpactBurstProps> = ({
       const opacity = Math.max(0, 1 - t * 1.2);
       const scale = Math.max(0, 1 - t);
 
-      setParticles((prev) =>
-        prev.length === 0
-          ? prev
-          : prev.map((p) => ({
-              ...p,
-              x: origin.x + Math.cos(p.angle) * radius,
-              y: origin.y + Math.sin(p.angle) * radius,
-              opacity,
-              scale,
-            }))
-      );
+      const container = particleContainerRef.current;
+      const list = particlesRef.current;
+      if (container && list.length > 0) {
+        for (let i = 0; i < container.children.length; i++) {
+          const p = list[i];
+          if (!p) break;
+          const el = container.children[i] as HTMLElement;
+          const x = origin.x + Math.cos(p.angle) * radius;
+          const y = origin.y + Math.sin(p.angle) * radius;
+          el.style.left = `${x}px`;
+          el.style.top = `${y}px`;
+          el.style.opacity = String(opacity);
+          el.style.transform = `translate(-50%, -50%) scale(${scale})`;
+        }
+      }
 
       if (t >= 1 && !completedRef.current) {
         completedRef.current = true;
@@ -114,7 +121,8 @@ export const WalletImpactBurst: React.FC<WalletImpactBurstProps> = ({
 
   return (
     <div className="absolute inset-0 pointer-events-none overflow-visible" style={{ zIndex: 66 }}>
-      {particles.map((p) => (
+      <div ref={particleContainerRef} className="absolute inset-0">
+        {particles.map((p) => (
         <div
           key={p.id}
           className="absolute rounded-full"
@@ -129,7 +137,8 @@ export const WalletImpactBurst: React.FC<WalletImpactBurstProps> = ({
             boxShadow: `0 0 6px ${p.color}`,
           }}
         />
-      ))}
+        ))}
+      </div>
     </div>
   );
 };

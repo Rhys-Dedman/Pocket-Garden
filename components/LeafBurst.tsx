@@ -79,6 +79,7 @@ export const LeafBurst: React.FC<LeafBurstProps> = ({ x, y, startTime, onComplet
   const completedRef = useRef(false);
   const onCompleteRef = useRef(onComplete);
   const raf60LastTickRef = useRef(0);
+  const containerRef = useRef<HTMLDivElement>(null);
   onCompleteRef.current = onComplete;
 
   useEffect(() => {
@@ -161,9 +162,20 @@ export const LeafBurst: React.FC<LeafBurstProps> = ({ x, y, startTime, onComplet
         p.scale = 1 - 0.5 * lifeProgress;
       });
 
-      setPositions(
-        posRef.current.map((p) => ({ x: p.x, y: p.y, opacity: p.opacity, rotation: p.rotation, scale: p.scale }))
-      );
+      const container = containerRef.current;
+      if (container) {
+        posRef.current.forEach((p, i) => {
+          const el = container.children[i] as HTMLElement;
+          if (!el) return;
+          const leaf = leaves[i];
+          el.style.left = `${p.x}px`;
+          el.style.top = `${p.y}px`;
+          el.style.opacity = String(p.opacity);
+          el.style.width = `${leaf.size}px`;
+          el.style.height = `${leaf.size}px`;
+          el.style.transform = `translate(-50%, -50%) scale(${p.scale}) rotate(${p.rotation}rad)`;
+        });
+      }
       rafRef.current = requestAnimationFrame(tick);
     };
 
@@ -185,19 +197,20 @@ export const LeafBurst: React.FC<LeafBurstProps> = ({ x, y, startTime, onComplet
         zIndex: 70,
       }}
     >
-      {leaves.map((leaf, i) => (
-        <div
-          key={leaf.id}
-          className="absolute"
-          style={{
-            left: positions[i].x,
-            top: positions[i].y,
-            width: leaf.size,
-            height: leaf.size,
-            transform: `translate(-50%, -50%) scale(${positions[i].scale}) rotate(${positions[i].rotation}rad)`,
-            opacity: positions[i].opacity,
-          }}
-        >
+      <div ref={containerRef} className="absolute" style={{ left: 0, top: 0 }}>
+        {leaves.map((leaf, i) => (
+          <div
+            key={leaf.id}
+            className="absolute"
+            style={{
+              left: positions[i].x,
+              top: positions[i].y,
+              width: leaf.size,
+              height: leaf.size,
+              transform: `translate(-50%, -50%) scale(${positions[i].scale}) rotate(${positions[i].rotation}rad)`,
+              opacity: positions[i].opacity,
+            }}
+          >
           {imgFailed[i] ? (
             <div
               className="w-full h-full rounded-sm"
@@ -215,8 +228,9 @@ export const LeafBurst: React.FC<LeafBurstProps> = ({ x, y, startTime, onComplet
               onError={() => setImgFailed((prev) => ({ ...prev, [i]: true }))}
             />
           )}
-        </div>
-      ))}
+          </div>
+        ))}
+      </div>
     </div>
   );
 };

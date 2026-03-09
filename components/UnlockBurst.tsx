@@ -70,6 +70,7 @@ export const UnlockBurst: React.FC<UnlockBurstProps> = ({ x, y, startTime, onCom
   const completedRef = useRef(false);
   const onCompleteRef = useRef(onComplete);
   const raf60LastTickRef = useRef(0);
+  const containerRef = useRef<HTMLDivElement>(null);
   onCompleteRef.current = onComplete;
 
   useEffect(() => {
@@ -149,9 +150,20 @@ export const UnlockBurst: React.FC<UnlockBurstProps> = ({ x, y, startTime, onCom
         p.scale = 1 - 0.5 * lifeProgress;
       });
 
-      setPositions(
-        posRef.current.map((p) => ({ x: p.x, y: p.y, opacity: p.opacity, rotation: p.rotation, scale: p.scale }))
-      );
+      const container = containerRef.current;
+      if (container) {
+        posRef.current.forEach((p, i) => {
+          const el = container.children[i] as HTMLElement;
+          if (!el) return;
+          const leaf = leaves[i];
+          el.style.left = `${p.x}px`;
+          el.style.top = `${p.y}px`;
+          el.style.opacity = String(p.opacity);
+          el.style.width = `${leaf.size}px`;
+          el.style.height = `${leaf.size}px`;
+          el.style.transform = `translate(-50%, -50%) scale(${p.scale}) rotate(${p.rotation}rad)`;
+        });
+      }
       rafRef.current = requestAnimationFrame(tick);
     };
 
@@ -173,20 +185,21 @@ export const UnlockBurst: React.FC<UnlockBurstProps> = ({ x, y, startTime, onCom
         zIndex: 70,
       }}
     >
-      {leaves.map((leaf, i) => (
-        <div
-          key={leaf.id}
-          className="absolute"
-          style={{
-            left: positions[i].x,
-            top: positions[i].y,
-            width: leaf.size,
-            height: leaf.size,
-            transform: `translate(-50%, -50%) scale(${positions[i].scale}) rotate(${positions[i].rotation}rad)`,
-            opacity: positions[i].opacity,
-          }}
-        >
-          {imgFailed[i] ? (
+      <div ref={containerRef} className="absolute" style={{ left: 0, top: 0 }}>
+        {leaves.map((leaf, i) => (
+          <div
+            key={leaf.id}
+            className="absolute"
+            style={{
+              left: positions[i].x,
+              top: positions[i].y,
+              width: leaf.size,
+              height: leaf.size,
+              transform: `translate(-50%, -50%) scale(${positions[i].scale}) rotate(${positions[i].rotation}rad)`,
+              opacity: positions[i].opacity,
+            }}
+          >
+            {imgFailed[i] ? (
             <div
               className="w-full h-full rounded-sm"
               style={{
@@ -202,9 +215,10 @@ export const UnlockBurst: React.FC<UnlockBurstProps> = ({ x, y, startTime, onCom
               style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.3))' }}
               onError={() => setImgFailed((prev) => ({ ...prev, [i]: true }))}
             />
-          )}
-        </div>
-      ))}
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 };
