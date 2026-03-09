@@ -47,16 +47,20 @@ export const BoostParticle: React.FC<BoostParticleProps> = ({
   onImpact,
   onComplete,
 }) => {
-  const [phase, setPhase] = useState<'moving' | 'trailOnly'>('moving');
-  const [pos, setPos] = useState<Point>({ x: data.startX, y: data.startY });
-  const [trail, setTrail] = useState<Point[]>([]);
-  const [trailOpacity, setTrailOpacity] = useState(1);
+  const [frame, setFrame] = useState<{ phase: 'moving' | 'trailOnly'; pos: Point; trail: Point[]; trailOpacity: number }>({
+    phase: 'moving',
+    pos: { x: data.startX, y: data.startY },
+    trail: [],
+    trailOpacity: 1,
+  });
   const startTimeRef = useRef<number>(Date.now());
   const startPosRef = useRef<Point>({ x: data.startX, y: data.startY });
   const trailRef = useRef<Point[]>([]);
   const impactFiredRef = useRef(false);
   const trailOnlyStartRef = useRef<number>(0);
+  const phaseRef = useRef<'moving' | 'trailOnly'>('moving');
   const rafRef = useRef<number>(0);
+  phaseRef.current = frame.phase;
 
   useEffect(() => {
     startTimeRef.current = Date.now();
@@ -80,7 +84,7 @@ export const BoostParticle: React.FC<BoostParticleProps> = ({
       const now = Date.now();
       const elapsed = now - startTimeRef.current;
 
-      if (phase === 'moving') {
+      if (phaseRef.current === 'moving') {
         const t = Math.min(elapsed / MOVE_DURATION_MS, 1);
         let eased: number;
         if (t < 0.5) {
@@ -92,7 +96,6 @@ export const BoostParticle: React.FC<BoostParticleProps> = ({
         const target = getTargetPos();
         const start = startPosRef.current;
 
-        // Curve from bottom (button) up to top bar: go up then into target
         const cp1x = start.x - 50;
         const cp1y = start.y - 200;
         const cp2x = target.x + 30;
@@ -108,32 +111,31 @@ export const BoostParticle: React.FC<BoostParticleProps> = ({
                   3 * oneMinusT * eased * eased * cp2y +
                   eased * eased * eased * target.y;
 
-        setPos({ x, y });
-
         trailRef.current = [{ x, y }, ...trailRef.current].slice(0, MAX_TRAIL_POINTS);
-        setTrail([...trailRef.current]);
 
         if (t >= 1) {
           if (!impactFiredRef.current) {
             impactFiredRef.current = true;
             onImpact?.(data);
           }
-          setPhase('trailOnly');
+          phaseRef.current = 'trailOnly';
           trailOnlyStartRef.current = now;
+          setFrame({ phase: 'trailOnly', pos: { x, y }, trail: [...trailRef.current], trailOpacity: 1 });
+        } else {
+          setFrame({ phase: 'moving', pos: { x, y }, trail: [...trailRef.current], trailOpacity: 1 });
         }
         rafRef.current = requestAnimationFrame(tick);
         return;
       }
 
-      if (phase === 'trailOnly') {
+      if (phaseRef.current === 'trailOnly') {
         const trailElapsed = now - trailOnlyStartRef.current;
         const fade = Math.max(0, 1 - trailElapsed / TRAIL_FADE_AFTER_HIT_MS);
-        setTrailOpacity(fade);
-        setTrail([...trailRef.current]);
         if (fade <= 0) {
           onComplete();
           return;
         }
+        setFrame((prev) => ({ ...prev, trailOpacity: fade, trail: [...trailRef.current] }));
         rafRef.current = requestAnimationFrame(tick);
         return;
       }
@@ -143,7 +145,9 @@ export const BoostParticle: React.FC<BoostParticleProps> = ({
 
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [phase, data, containerRef, boostAreaRef, onImpact, onComplete]);
+  }, [data, containerRef, boostAreaRef, onImpact, onComplete]);
+
+  const { phase, pos, trail, trailOpacity } = frame;
 
   return (
     <div className="absolute inset-0 pointer-events-none overflow-visible" style={{ zIndex: 200 }}>
