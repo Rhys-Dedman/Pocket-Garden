@@ -4,6 +4,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { assetPath } from '../utils/assetPath';
+import { getTickCount60 } from '../utils/raf60';
 import { ActiveBoostIndicator, ActiveBoostData, ACTIVE_BOOST_INDICATOR_SIZE_PX } from './ActiveBoostIndicator';
 
 const BOOST_GAP_PX = 2;
@@ -87,18 +88,23 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   const [bounceKey, setBounceKey] = useState(0);
   const [progressBarFlash, setProgressBarFlash] = useState(false);
   const [fps, setFps] = useState(0);
-  const frameCountRef = useRef(0);
-  const lastFpsTimeRef = useRef(performance.now());
+  const rafCountRef = useRef(0);
+  const gameTickCountRef = useRef(0);
+  const gameTickRef = useRef(0);
+  const lastFpsUpdateRef = useRef(performance.now());
   useEffect(() => {
     let rafId: number;
     const tick = () => {
-      frameCountRef.current += 1;
+      rafCountRef.current += 1;
+      gameTickCountRef.current += getTickCount60(gameTickRef);
       const now = performance.now();
-      const elapsed = now - lastFpsTimeRef.current;
-      if (elapsed >= 1000) {
-        setFps(Math.round((frameCountRef.current * 1000) / elapsed));
-        frameCountRef.current = 0;
-        lastFpsTimeRef.current = now;
+      if (now - lastFpsUpdateRef.current >= 1000) {
+        const rafPerSec = rafCountRef.current;
+        const ticksDelivered = gameTickCountRef.current;
+        setFps(Math.min(60, rafPerSec, ticksDelivered));
+        rafCountRef.current = 0;
+        gameTickCountRef.current = 0;
+        lastFpsUpdateRef.current = now;
       }
       rafId = requestAnimationFrame(tick);
     };
@@ -373,13 +379,19 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
       </div>
 
       <div className="flex items-center gap-2 flex-shrink-0">
-        <span
-          className="tabular-nums text-[10px] font-semibold select-none"
-          style={{ color: '#c4a574' }}
-          aria-label={`${fps} FPS`}
+        <button
+          type="button"
+          className="tabular-nums text-[10px] font-semibold select-none cursor-pointer hover:underline focus:outline-none"
+          style={{ color: '#c4a574', background: 'none', border: 'none', padding: 0 }}
+          aria-label={`${fps} FPS (click to simulate hitch)`}
+          title="Click to simulate a hitch — FPS should drop briefly if the counter is working"
+          onClick={() => {
+            const end = performance.now() + 250;
+            while (performance.now() < end) {}
+          }}
         >
           {fps} FPS
-        </span>
+        </button>
         <button
           onClick={onPauseClick}
           className="flex items-center justify-center rounded-full transition-all active:scale-95 flex-shrink-0"

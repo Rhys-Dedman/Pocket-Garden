@@ -30,6 +30,7 @@ import { ButtonLeafBurst } from './components/ButtonLeafBurst';
 import { LoadingScreen } from './components/LoadingScreen';
 import { TabType, ScreenType, BoardCell, Item, DragState } from './types';
 import { assetPath } from './utils/assetPath';
+import { getTickCount60, TARGET_FRAME_MS } from './utils/raf60';
 import { LIMITED_OFFERS, getOfferById } from './offers';
 
 /** Coin per plant level: level 1 = 5, level 2 = 10, level 3 = 20, ... */
@@ -785,6 +786,7 @@ export default function App() {
   const seedProductionLevel = seedsState?.seed_production?.level ?? 0;
   const lastSeedProgressTimeRef = useRef<number>(0);
   const seedProgressRef = useRef<number>(0);
+  const seedRaf60LastTickRef = useRef<number>(0);
   const tapZoomRef = useRef<{ start: number; end: number; startTime: number; duration: number } | null>(null);
   const [tapZoomTrigger, setTapZoomTrigger] = useState(0);
 
@@ -835,10 +837,13 @@ export default function App() {
         rafId = requestAnimationFrame(tick);
         return;
       }
-      const now = Date.now();
-      let deltaMs = now - lastSeedProgressTimeRef.current;
-      lastSeedProgressTimeRef.current = now;
-      deltaMs = Math.min(deltaMs, 50); // cap for tab backgrounding
+      const n = getTickCount60(seedRaf60LastTickRef);
+      if (n === 0) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
+      lastSeedProgressTimeRef.current = Date.now();
+      const deltaMs = Math.min(n * TARGET_FRAME_MS, 50); // cap for tab backgrounding
       const added = deltaMs * percentPerMs;
       const next = Math.min(100, seedProgressRef.current + added);
       seedProgressRef.current = next;
@@ -1139,6 +1144,7 @@ export default function App() {
   const harvestSpeedLevel = getHarvestSpeedLevel(cropsState);
   const lastHarvestProgressTimeRef = useRef<number>(0);
   const harvestProgressRef = useRef<number>(0);
+  const harvestRaf60LastTickRef = useRef<number>(0);
   const harvestTapZoomRef = useRef<{ start: number; end: number; startTime: number; duration: number } | null>(null);
   const [harvestTapZoomTrigger, setHarvestTapZoomTrigger] = useState(0);
 
@@ -1188,10 +1194,13 @@ export default function App() {
         rafId = requestAnimationFrame(tick);
         return;
       }
-      const now = Date.now();
-      let deltaMs = now - lastHarvestProgressTimeRef.current;
-      lastHarvestProgressTimeRef.current = now;
-      deltaMs = Math.min(deltaMs, 50); // cap for tab backgrounding
+      const n = getTickCount60(harvestRaf60LastTickRef);
+      if (n === 0) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
+      lastHarvestProgressTimeRef.current = Date.now();
+      const deltaMs = Math.min(n * TARGET_FRAME_MS, 50); // cap for tab backgrounding
       const added = deltaMs * percentPerMs;
       const next = Math.min(100, harvestProgressRef.current + added);
       harvestProgressRef.current = next;

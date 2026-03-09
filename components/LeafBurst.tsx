@@ -5,6 +5,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { PLANT_CONTAINER_WIDTH, PLANT_CONTAINER_HEIGHT } from '../constants/boardLayout';
 import { assetPath } from '../utils/assetPath';
+import { shouldTick60 } from '../utils/raf60';
 
 const LEAF_SPRITES = [assetPath('/assets/vfx/particle_leaf_1.png'), assetPath('/assets/vfx/particle_leaf_2.png')];
 const LEAF_SPRITES_GOLD = [assetPath('/assets/vfx/particle_leaf_3.png'), assetPath('/assets/vfx/particle_leaf_4.png')];
@@ -77,6 +78,7 @@ export const LeafBurst: React.FC<LeafBurstProps> = ({ x, y, startTime, onComplet
   const rafRef = useRef<number>(0);
   const completedRef = useRef(false);
   const onCompleteRef = useRef(onComplete);
+  const raf60LastTickRef = useRef(0);
   onCompleteRef.current = onComplete;
 
   useEffect(() => {
@@ -102,6 +104,10 @@ export const LeafBurst: React.FC<LeafBurstProps> = ({ x, y, startTime, onComplet
           completedRef.current = true;
           onCompleteRef.current();
         }
+        return;
+      }
+      if (!shouldTick60(raf60LastTickRef)) {
+        rafRef.current = requestAnimationFrame(tick);
         return;
       }
       const dtSec = 1 / 60;

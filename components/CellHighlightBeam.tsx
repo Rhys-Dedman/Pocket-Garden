@@ -7,8 +7,9 @@
  * - Fades in quickly, then slowly fades out
  * - Sparkles rise in a spiral pattern with eased velocity (fast then slow)
  */
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { assetPath } from '../utils/assetPath';
+import { shouldTick60 } from '../utils/raf60';
 
 interface CellHighlightBeamProps {
   x: number;
@@ -60,6 +61,7 @@ export const CellHighlightBeam: React.FC<CellHighlightBeamProps> = ({
 }) => {
   const [progress, setProgress] = useState(0);
   const [spriteOpacity, setSpriteOpacity] = useState(0);
+  const raf60LastTickRef = useRef(0);
 
   const sparkles = useMemo<Sparkle[]>(() => {
     return Array.from({ length: SPARKLE_COUNT }, (_, i) => ({
@@ -84,29 +86,30 @@ export const CellHighlightBeam: React.FC<CellHighlightBeamProps> = ({
     const animate = () => {
       const elapsed = Date.now() - startTime;
       const t = Math.min(1, elapsed / VFX_DURATION_MS);
-      
-      // Ease out for spiral progress (fast start, slows down)
-      const easeOut = 1 - Math.pow(1 - t, 3);
-      setProgress(easeOut);
-      
-      // Sprite opacity: fast fade in, slow fade out
-      if (elapsed < FADE_IN_DURATION_MS) {
-        // Fast fade in (0 to 100% in FADE_IN_DURATION_MS)
-        setSpriteOpacity(elapsed / FADE_IN_DURATION_MS);
-      } else {
-        // Slow fade out over the rest of the duration
-        const fadeOutProgress = (elapsed - FADE_IN_DURATION_MS) / (VFX_DURATION_MS - FADE_IN_DURATION_MS);
-        setSpriteOpacity(Math.max(0, 1 - fadeOutProgress));
-      }
-      
+
       if (t >= 1) {
         onComplete();
         return;
       }
-      
+
+      if (!shouldTick60(raf60LastTickRef)) {
+        rafId = requestAnimationFrame(animate);
+        return;
+      }
+
+      const easeOut = 1 - Math.pow(1 - t, 3);
+      setProgress(easeOut);
+
+      if (elapsed < FADE_IN_DURATION_MS) {
+        setSpriteOpacity(elapsed / FADE_IN_DURATION_MS);
+      } else {
+        const fadeOutProgress = (elapsed - FADE_IN_DURATION_MS) / (VFX_DURATION_MS - FADE_IN_DURATION_MS);
+        setSpriteOpacity(Math.max(0, 1 - fadeOutProgress));
+      }
+
       rafId = requestAnimationFrame(animate);
     };
-    
+
     rafId = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(rafId);
   }, [startTime, onComplete]);

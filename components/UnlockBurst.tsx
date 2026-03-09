@@ -8,6 +8,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { PLANT_CONTAINER_WIDTH } from '../constants/boardLayout';
 import { assetPath } from '../utils/assetPath';
+import { shouldTick60 } from '../utils/raf60';
 
 const LEAF_SPRITES = [assetPath('/assets/vfx/particle_leaf_1.png'), assetPath('/assets/vfx/particle_leaf_2.png')];
 const CELL_SCALE = 1.2;
@@ -68,6 +69,7 @@ export const UnlockBurst: React.FC<UnlockBurstProps> = ({ x, y, startTime, onCom
   const rafRef = useRef<number>(0);
   const completedRef = useRef(false);
   const onCompleteRef = useRef(onComplete);
+  const raf60LastTickRef = useRef(0);
   onCompleteRef.current = onComplete;
 
   useEffect(() => {
@@ -93,6 +95,10 @@ export const UnlockBurst: React.FC<UnlockBurstProps> = ({ x, y, startTime, onCom
           completedRef.current = true;
           onCompleteRef.current();
         }
+        return;
+      }
+      if (!shouldTick60(raf60LastTickRef)) {
+        rafRef.current = requestAnimationFrame(tick);
         return;
       }
       const dtSec = 1 / 60;
