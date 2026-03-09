@@ -14,39 +14,25 @@ interface Point {
   y: number;
 }
 
-interface Sparkle {
-  id: number;
-  x: number;
-  y: number;
-  life: number;
-  size: number;
-  vx: number;
-  vy: number;
-}
-
 export const Projectile: React.FC<ProjectileProps> = ({ data, onImpact, onComplete, appScale = 1 }) => {
   const [frame, setFrame] = useState<{
     airPos: Point;
     shadowPos: Point;
     airTrail: Point[];
     shadowTrail: Point[];
-    sparkles: Sparkle[];
     isImpacted: boolean;
   }>({
     airPos: { x: data.startX, y: data.startY },
     shadowPos: { x: data.startX, y: data.startY },
     airTrail: [],
     shadowTrail: [],
-    sparkles: [],
     isImpacted: false,
   });
 
   const frameRef = useRef<number>(0);
   const startTimeRef = useRef<number>(Date.now());
-  const particleIdCounter = useRef(0);
   const airTrailRef = useRef<Point[]>([]);
   const shadowTrailRef = useRef<Point[]>([]);
-  const sparklesRef = useRef<Sparkle[]>([]);
   const airPosRef = useRef<Point>({ x: data.startX, y: data.startY });
   const shadowPosRef = useRef<Point>({ x: data.startX, y: data.startY });
   const isImpactedRef = useRef(false);
@@ -54,8 +40,9 @@ export const Projectile: React.FC<ProjectileProps> = ({ data, onImpact, onComple
   const [containerHeight, setContainerHeight] = useState(800);
 
   const particleDiameter = 21;
-  const maxTrailPoints = 25; 
-  const maxShadowTrailPoints = Math.floor(maxTrailPoints * 1.5); // 50% longer trail for shadow
+  /** Shorter trails = fewer SVG elements per projectile; helps when many seeds fly (e.g. seed storm). */
+  const maxTrailPoints = 12;
+  const maxShadowTrailPoints = Math.floor(maxTrailPoints * 1.5);
 
   useEffect(() => {
     const el = document.getElementById(`hex-${data.targetIdx}`);
@@ -142,38 +129,10 @@ export const Projectile: React.FC<ProjectileProps> = ({ data, onImpact, onComple
         newShadowPos = { x: sx, y: sy };
         nextAirTrail = [newAirPos, ...airTrailRef.current].slice(0, maxTrailPoints);
         nextShadowTrail = [newShadowPos, ...shadowTrailRef.current].slice(0, maxShadowTrailPoints);
-
-        const sparkleChance = t > 0.6 ? 0.22 : 0.12;
-        if (Math.random() < sparkleChance) {
-          const count = Math.floor(Math.random() * 2) + 2;
-          const newSparkles: Sparkle[] = [];
-          for (let i = 0; i < count; i++) {
-            const pId = particleIdCounter.current++;
-            newSparkles.push({
-              id: pId,
-              x: ax + (Math.random() - 0.5) * 6,
-              y: ayReal + (Math.random() - 0.5) * 6,
-              life: 1,
-              size: Math.random() * 3 + 3,
-              vx: (Math.random() - 0.5) * 0.7,
-              vy: (Math.random() - 0.5) * 0.7
-            });
-          }
-          sparklesRef.current = [...sparklesRef.current, ...newSparkles];
-        }
       } else if (!isImpactedRef.current) {
         isImpactedRef.current = true;
         onImpact(data.targetIdx);
       }
-
-      let nextSparkles = sparklesRef.current
-        .map(sp => ({
-          ...sp,
-          x: sp.x + sp.vx,
-          y: sp.y + sp.vy + 0.018,
-          life: sp.life - 0.025
-        }))
-        .filter(sp => sp.life > 0);
 
       if (t >= 1) {
         nextAirTrail = nextAirTrail.slice(0, Math.max(0, nextAirTrail.length - 3));
@@ -182,7 +141,6 @@ export const Projectile: React.FC<ProjectileProps> = ({ data, onImpact, onComple
 
       airTrailRef.current = nextAirTrail;
       shadowTrailRef.current = nextShadowTrail;
-      sparklesRef.current = nextSparkles;
       airPosRef.current = newAirPos;
       shadowPosRef.current = newShadowPos;
       if (t >= 1) isImpactedRef.current = true;
@@ -192,11 +150,10 @@ export const Projectile: React.FC<ProjectileProps> = ({ data, onImpact, onComple
         shadowPos: newShadowPos,
         airTrail: nextAirTrail,
         shadowTrail: nextShadowTrail,
-        sparkles: nextSparkles,
         isImpacted: isImpactedRef.current,
       });
 
-      if (t >= 1 && nextAirTrail.length === 0 && nextShadowTrail.length === 0 && nextSparkles.length === 0) {
+      if (t >= 1 && nextAirTrail.length === 0 && nextShadowTrail.length === 0) {
         onComplete();
       } else {
         frameRef.current = requestAnimationFrame(animate);
@@ -210,14 +167,8 @@ export const Projectile: React.FC<ProjectileProps> = ({ data, onImpact, onComple
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden">
       <svg className="absolute inset-0 w-full h-full overflow-visible">
-        <defs>
-          <filter id="p-glow">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="0.6" />
-          </filter>
-        </defs>
-        
-        {/* Shadow Trail Group: black, 20% opacity */}
-        <g filter="url(#p-glow)" style={{ opacity: 0.2 }}>
+        {/* Shadow trail: no blur to reduce cost when many seeds fly */}
+        <g style={{ opacity: 0.2 }}>
           {frame.shadowTrail.map((p, i) => {
             if (i === 0) return null;
             const prev = frame.shadowTrail[i-1];
@@ -240,8 +191,8 @@ export const Projectile: React.FC<ProjectileProps> = ({ data, onImpact, onComple
           })}
         </g>
 
-        {/* Air Trail Group */}
-        <g filter="url(#p-glow)">
+        {/* Air trail: no blur to reduce cost when many seeds fly */}
+        <g>
           {frame.airTrail.map((p, i) => {
             if (i === 0) return null;
             const prev = frame.airTrail[i-1];
@@ -264,21 +215,6 @@ export const Projectile: React.FC<ProjectileProps> = ({ data, onImpact, onComple
           })}
         </g>
       </svg>
-
-      {frame.sparkles.map(p => (
-        <div 
-          key={p.id} 
-          className="absolute rounded-full bg-[#fdf9e9] shadow-[0_0_12px_#fcf0c6] mix-blend-screen" 
-          style={{ 
-            left: p.x, 
-            top: p.y, 
-            width: p.size, 
-            height: p.size, 
-            opacity: p.life,
-            transform: 'translate(-50%, -50%)' 
-          }} 
-        />
-      ))}
 
       {!frame.isImpacted && (
         <>
