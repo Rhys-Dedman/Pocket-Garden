@@ -69,7 +69,11 @@ export const CoinPanel: React.FC<CoinPanelProps> = ({
   onComplete,
   activePanelCount = 1,
 }) => {
-  const useTrail = activePanelCount <= SKIP_TRAIL_WHEN_PANELS_ABOVE;
+  // Freeze at spawn: if we mounted with many panels, never show trail (avoids mid-flight switch → white straight artifact)
+  const skipTrailLifetimeRef = useRef(false);
+  if (activePanelCount > SKIP_TRAIL_WHEN_PANELS_ABOVE) skipTrailLifetimeRef.current = true;
+  const useTrail = activePanelCount <= SKIP_TRAIL_WHEN_PANELS_ABOVE && !skipTrailLifetimeRef.current;
+
   const [phase, setPhase] = useState<'reveal' | 'hold' | 'moveToWallet' | 'trailOnly'>('reveal');
   const [pos, setPos] = useState<Point>({ x: data.startX, y: data.startY });
   // size as scale: start 0 width, 0.5 height → end 1, 1

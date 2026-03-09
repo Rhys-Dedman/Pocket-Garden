@@ -1633,10 +1633,15 @@ export default function App() {
         setHarvestBounceCellIndices(harvestCellIndices);
         setTimeout(() => setHarvestBounceCellIndices([]), 250);
 
-        // Batch leaf bursts into one setState; use fewer particles when many harvests (FPS)
+        // Batch leaf bursts; when many harvests reduce count + particles for FPS (19 cells → fewer bursts, 1 particle)
         const now = Date.now();
-        const manyHarvests = harvestCellIndices.length > 10;
-        const newBursts = harvestCellIndices
+        const harvestCount = harvestCellIndices.length;
+        const manyHarvests = harvestCount > 10;
+        const veryManyHarvests = harvestCount > 15;
+        const cellIndicesToBurst = veryManyHarvests
+          ? harvestCellIndices.filter((_, i) => i % 3 === 0)
+          : harvestCellIndices;
+        const newBursts = cellIndicesToBurst
           .map((cellIdx) => {
             const hexEl = document.getElementById(`hex-${cellIdx}`);
             if (!hexEl) return null;
@@ -1646,7 +1651,7 @@ export default function App() {
               x: r.left + r.width / 2,
               y: r.top + r.height / 2,
               startTime: now,
-              ...(manyHarvests ? { particleCount: 2 } : {}),
+              ...(manyHarvests ? { particleCount: veryManyHarvests ? 1 : 2 } : {}),
             };
           })
           .filter((b): b is NonNullable<typeof b> => b !== null);
@@ -1727,7 +1732,9 @@ export default function App() {
     const mergeBursts: { id: string; x: number; y: number; startTime: number; particleCount?: number }[] = [];
     const mergeBeams: { id: string; x: number; y: number; cellWidth: number; cellHeight: number; startTime: number }[] = [];
     const mergeNow = Date.now();
-    const manyMergeHarvests = triggeredCells.length > 10;
+    const mergeCount = triggeredCells.length;
+    const manyMergeHarvests = mergeCount > 10;
+    const veryManyMergeHarvests = mergeCount > 15;
 
     triggeredCells.forEach((cellIdx) => {
       const cell = grid[cellIdx];
@@ -1806,7 +1813,7 @@ export default function App() {
         x: hexRect.left + hexRect.width / 2,
         y: hexRect.top + hexRect.height / 2,
         startTime: mergeNow,
-        ...(manyMergeHarvests ? { particleCount: 2 } : {}),
+        ...(manyMergeHarvests ? { particleCount: veryManyMergeHarvests ? 1 : 2 } : {}),
       });
       mergeBeams.push({
         id: `merge-harvest-highlight-${cellIdx}-${mergeNow}-${Math.random().toString(36).slice(2)}`,
