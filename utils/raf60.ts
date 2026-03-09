@@ -1,3 +1,5 @@
+import { getPerformanceMode } from './performanceMode';
+
 /**
  * 60fps cap for game loops. Use so we don't waste work on 90/120Hz displays.
  * One shared constant – change here if you ever want a different cap.
@@ -59,4 +61,22 @@ export function shouldTick10(lastTickRef: { current: number }): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * When Performance mode is ON, caps at 30fps; otherwise normal rAF.
+ * Use in animation loops: rafRef.current = scheduleNextFrame(tick);
+ */
+let lastFrame30 = 0;
+export function scheduleNextFrame(callback: FrameRequestCallback): number {
+  if (!getPerformanceMode()) return requestAnimationFrame(callback);
+  return requestAnimationFrame(function frame(now: number) {
+    const t = typeof now === 'number' ? now : performance.now();
+    if (t - lastFrame30 >= TARGET_FRAME_MS_30) {
+      lastFrame30 = t;
+      callback(t);
+    } else {
+      scheduleNextFrame(callback);
+    }
+  });
 }

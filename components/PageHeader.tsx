@@ -5,6 +5,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { assetPath } from '../utils/assetPath';
 import { getTickCount60 } from '../utils/raf60';
+import { getPerformanceMode } from '../utils/performanceMode';
+
+/** Slightly under 33.33ms so we reliably get 30 counts/sec (avoids 25 due to timing). */
+const FPS_COUNT_INTERVAL_30_MS = 32;
 import { ActiveBoostIndicator, ActiveBoostData, ACTIVE_BOOST_INDICATOR_SIZE_PX } from './ActiveBoostIndicator';
 
 const BOOST_GAP_PX = 2;
@@ -92,19 +96,33 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   const gameTickCountRef = useRef(0);
   const gameTickRef = useRef(0);
   const lastFpsUpdateRef = useRef(performance.now());
+  const lastCountTimeRef = useRef(performance.now());
   useEffect(() => {
     let rafId: number;
     const tick = () => {
-      rafCountRef.current += 1;
-      gameTickCountRef.current += getTickCount60(gameTickRef);
       const now = performance.now();
+      const perfMode = getPerformanceMode();
+      if (perfMode) {
+        if (now - lastCountTimeRef.current >= FPS_COUNT_INTERVAL_30_MS) {
+          lastCountTimeRef.current = now;
+          rafCountRef.current += 1;
+        }
+      } else {
+        rafCountRef.current += 1;
+      }
+      gameTickCountRef.current += getTickCount60(gameTickRef);
       if (now - lastFpsUpdateRef.current >= 1000) {
         const rafPerSec = rafCountRef.current;
         const ticksDelivered = gameTickCountRef.current;
-        setFps(Math.min(60, rafPerSec, ticksDelivered));
+        const maxFps = perfMode ? 30 : 60;
+        // In perf mode, 25–30 counts is "30fps target"; show 30 so it doesn't snap down to 25
+        const raw = Math.min(maxFps, rafPerSec, ticksDelivered);
+        const displayFps = perfMode && raw >= 24 ? 30 : raw;
+        setFps(displayFps);
         rafCountRef.current = 0;
         gameTickCountRef.current = 0;
         lastFpsUpdateRef.current = now;
+        lastCountTimeRef.current = now;
       }
       rafId = requestAnimationFrame(tick);
     };

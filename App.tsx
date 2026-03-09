@@ -30,7 +30,8 @@ import { ButtonLeafBurst } from './components/ButtonLeafBurst';
 import { LoadingScreen } from './components/LoadingScreen';
 import { TabType, ScreenType, BoardCell, Item, DragState } from './types';
 import { assetPath } from './utils/assetPath';
-import { getTickCount60, TARGET_FRAME_MS } from './utils/raf60';
+import { getTickCount60, TARGET_FRAME_MS, scheduleNextFrame } from './utils/raf60';
+import { getPerformanceMode } from './utils/performanceMode';
 import { LIMITED_OFFERS, getOfferById } from './offers';
 
 /** Coin per plant level: level 1 = 5, level 2 = 10, level 3 = 20, ... */
@@ -1198,12 +1199,12 @@ export default function App() {
     const tick = () => {
       if (harvestTapZoomRef.current) {
         lastHarvestProgressTimeRef.current = Date.now();
-        rafId = requestAnimationFrame(tick);
+        rafId = scheduleNextFrame(tick);
         return;
       }
       const n = getTickCount60(harvestRaf60LastTickRef);
       if (n === 0) {
-        rafId = requestAnimationFrame(tick);
+        rafId = scheduleNextFrame(tick);
         return;
       }
       lastHarvestProgressTimeRef.current = Date.now();
@@ -1215,9 +1216,9 @@ export default function App() {
         setHarvestProgress(100);
         setIsHarvestFlashing(true);
       }
-      rafId = requestAnimationFrame(tick);
+      rafId = scheduleNextFrame(tick);
     };
-    rafId = requestAnimationFrame(tick);
+    rafId = scheduleNextFrame(tick);
     return () => cancelAnimationFrame(rafId);
   }, [harvestSpeedLevel, isLoading, activeBoosts]);
 
@@ -1230,7 +1231,7 @@ export default function App() {
     const nowFlashing = isHarvestFlashing;
     prevIsHarvestFlashingRef.current = isHarvestFlashing;
     
-    if (wasNotFlashing && nowFlashing && harvestButtonRef.current) {
+    if (wasNotFlashing && nowFlashing && harvestButtonRef.current && !getPerformanceMode()) {
       const rect = harvestButtonRef.current.getBoundingClientRect();
       const centerX = rect.left + rect.width / 2;
       const centerY = rect.top + rect.height / 2;
@@ -1245,7 +1246,7 @@ export default function App() {
 
   // Helper function to trigger seed button leaf burst (called when shooting a seed)
   const triggerSeedButtonLeafBurst = useCallback(() => {
-    if (plantButtonRef.current) {
+    if (plantButtonRef.current && !getPerformanceMode()) {
       const rect = plantButtonRef.current.getBoundingClientRect();
       const centerX = rect.left + rect.width / 2;
       const centerY = rect.top + rect.height / 2;
@@ -1633,13 +1634,14 @@ export default function App() {
         setHarvestBounceCellIndices(harvestCellIndices);
         setTimeout(() => setHarvestBounceCellIndices([]), 250);
 
-        // Batch leaf bursts; when many harvests reduce count + particles for FPS (19 cells → fewer bursts, 1 particle)
+        // Batch leaf bursts; when many harvests reduce count + particles for FPS. Performance mode: stricter limits.
         const now = Date.now();
         const harvestCount = harvestCellIndices.length;
-        const manyHarvests = harvestCount > 10;
-        const veryManyHarvests = harvestCount > 15;
+        const perfMode = getPerformanceMode();
+        const manyHarvests = perfMode ? harvestCount > 4 : harvestCount > 10;
+        const veryManyHarvests = perfMode ? harvestCount > 8 : harvestCount > 15;
         const cellIndicesToBurst = veryManyHarvests
-          ? harvestCellIndices.filter((_, i) => i % 3 === 0)
+          ? harvestCellIndices.filter((_, i) => i % (perfMode ? 4 : 3) === 0)
           : harvestCellIndices;
         const newBursts = cellIndicesToBurst
           .map((cellIdx) => {
@@ -1651,11 +1653,11 @@ export default function App() {
               x: r.left + r.width / 2,
               y: r.top + r.height / 2,
               startTime: now,
-              ...(manyHarvests ? { particleCount: veryManyHarvests ? 1 : 2 } : {}),
+              ...(manyHarvests ? { particleCount: veryManyHarvests || perfMode ? 1 : 2 } : {}),
             };
           })
           .filter((b): b is NonNullable<typeof b> => b !== null);
-        if (newBursts.length > 0) {
+        if (newBursts.length > 0 && !getPerformanceMode()) {
           setLeafBurstsSmall((prev) => [...prev, ...newBursts]);
         }
 
@@ -1825,7 +1827,7 @@ export default function App() {
       });
     });
 
-    if (mergeBursts.length > 0) {
+    if (mergeBursts.length > 0 && !getPerformanceMode()) {
       setLeafBurstsSmall((prev) => [...prev, ...mergeBursts]);
     }
     if (mergeBeams.length > 0) {
@@ -2202,13 +2204,14 @@ export default function App() {
                         return next;
                       });
                       setPlayerLevelFlashTrigger((t) => t + 1);
-                      // Leaf burst at tap (leaf 3 & 4, same stats as normal merge burst)
-                      setGoalCoinLeafBursts((prev) => [...prev, {
-                        id: `goal-coin-lb-${nextGoalCoinBurstIdRef.current++}`,
-                        x: r.left + r.width / 2,
-                        y: r.top + r.height / 2 + 30,
-                        startTime: Date.now(),
-                      }]);
+                      if (!getPerformanceMode()) {
+                        setGoalCoinLeafBursts((prev) => [...prev, {
+                          id: `goal-coin-lb-${nextGoalCoinBurstIdRef.current++}`,
+                          x: r.left + r.width / 2,
+                          y: r.top + r.height / 2 + 30,
+                          startTime: Date.now(),
+                        }]);
+                      }
                     }
                     setTimeout(() => {
                       const displayOrderBefore = goalDisplayOrder.filter((i) => goalSlots[i] !== 'empty');
@@ -2329,12 +2332,14 @@ export default function App() {
                           const cr = container.getBoundingClientRect();
                           const startX = (r.left + r.width / 2 - cr.left) / appScale;
                           const startY = (r.top + r.height / 2 - cr.top) / appScale;
-                          setGoalCoinLeafBursts((prev) => [...prev, {
-                            id: `goal-coin-lb-${nextGoalCoinBurstIdRef.current++}`,
-                            x: r.left + r.width / 2,
-                            y: r.top + r.height / 2 + 30,
-                            startTime: Date.now(),
-                          }]);
+                          if (!getPerformanceMode()) {
+                            setGoalCoinLeafBursts((prev) => [...prev, {
+                              id: `goal-coin-lb-${nextGoalCoinBurstIdRef.current++}`,
+                              x: r.left + r.width / 2,
+                              y: r.top + r.height / 2 + 30,
+                              startTime: Date.now(),
+                            }]);
+                          }
                           setActiveGoalCoinParticles((prev) => [...prev, { id: `coin-goal-${Date.now()}`, startX, startY, value: effectiveValue }]);
                         }
                         lastCoinGoalHiddenAtRef.current = Date.now();
@@ -2462,15 +2467,17 @@ export default function App() {
                       if (!container) return;
                       const scale = appScaleRef.current;
                       const rect = container.getBoundingClientRect();
-                      setLeafBursts((prev) => [
-                        ...prev,
-                        {
-                          id: Math.random().toString(36).slice(2),
-                          x: rect.left + px * scale,
-                          y: rect.top + py * scale,
-                          startTime: Date.now(),
-                        },
-                      ]);
+                      if (!getPerformanceMode()) {
+                        setLeafBursts((prev) => [
+                          ...prev,
+                          {
+                            id: Math.random().toString(36).slice(2),
+                            x: rect.left + px * scale,
+                            y: rect.top + py * scale,
+                            startTime: Date.now(),
+                          },
+                        ]);
+                      }
                       if (mergeResultLevel != null) {
                         const slotIdx = mergeResultLevel >= 1 && mergeResultLevel <= 24
                           ? goalPlantTypes.findIndex((pt, i) =>
@@ -2538,18 +2545,19 @@ export default function App() {
                       if (!container) return;
                       const scale = appScaleRef.current;
                       const rect = container.getBoundingClientRect();
-                      // Spawn leaf burst at drop location (30 particles, circular spread)
-                      setLeafBurstsSmall((prev) => [
-                        ...prev,
-                        {
-                          id: `delete-${cellIdx}-${Date.now()}`,
-                          x: rect.left + px * scale,
-                          y: rect.top + py * scale,
-                          startTime: Date.now(),
-                          particleCount: 30,
-                          useCircle: true,
-                        },
-                      ]);
+                      if (!getPerformanceMode()) {
+                        setLeafBurstsSmall((prev) => [
+                          ...prev,
+                          {
+                            id: `delete-${cellIdx}-${Date.now()}`,
+                            x: rect.left + px * scale,
+                            y: rect.top + py * scale,
+                            startTime: Date.now(),
+                            particleCount: 30,
+                            useCircle: true,
+                          },
+                        ]);
+                      }
                       // Remove the plant from the grid
                       setGrid((prev) => {
                         const newGrid = [...prev];
@@ -3209,7 +3217,9 @@ export default function App() {
                   const hexEl = document.getElementById(`hex-${targetIdx}`);
                   if (hexEl) {
                     const r = hexEl.getBoundingClientRect();
-                    setLeafBurstsSmall((prev) => [...prev, { id: `sd-burst-${targetIdx}-${Date.now()}`, x: r.left + r.width / 2, y: r.top + r.height / 2, startTime: Date.now() }]);
+                    if (!getPerformanceMode()) {
+                      setLeafBurstsSmall((prev) => [...prev, { id: `sd-burst-${targetIdx}-${Date.now()}`, x: r.left + r.width / 2, y: r.top + r.height / 2, startTime: Date.now() }]);
+                    }
                     setCellHighlightBeams((prev) => [...prev, { id: `special-delivery-${targetIdx}-${Date.now()}`, x: r.left + r.width / 2, y: r.top + r.height / 2, cellWidth: r.width, cellHeight: r.height, startTime: Date.now() }]);
                   }
                   return;
@@ -3219,15 +3229,17 @@ export default function App() {
                 const hexEl = document.getElementById(`hex-${targetIdx}`);
                 if (hexEl) {
                   const r = hexEl.getBoundingClientRect();
-                  setLeafBurstsSmall((prev) => [
-                    ...prev,
-                    {
-                      id: Math.random().toString(36).slice(2),
-                      x: r.left + r.width / 2,
-                      y: r.top + r.height / 2,
-                      startTime: Date.now(),
-                    },
-                  ]);
+                  if (!getPerformanceMode()) {
+                    setLeafBurstsSmall((prev) => [
+                      ...prev,
+                      {
+                        id: Math.random().toString(36).slice(2),
+                        x: r.left + r.width / 2,
+                        y: r.top + r.height / 2,
+                        startTime: Date.now(),
+                      },
+                    ]);
+                  }
                   
                   if (p.plantLevel > seedLevel) {
                     setCellHighlightBeams((prev) => [

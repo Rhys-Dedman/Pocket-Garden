@@ -5,6 +5,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { assetPath } from '../utils/assetPath';
+import { getPerformanceMode } from '../utils/performanceMode';
 
 const MOVE_DURATION_MS = 350;
 /** Shorter trail = fewer SVG elements when many coins fly at once (e.g. 5+ goals). */
@@ -50,7 +51,8 @@ export const GoalCoinParticle: React.FC<GoalCoinParticleProps> = ({
   appScale = 1,
   activeCount = 1,
 }) => {
-  const useTrail = activeCount <= SKIP_TRAIL_WHEN_ACTIVE_ABOVE;
+  const trailLimit = getPerformanceMode() ? 2 : SKIP_TRAIL_WHEN_ACTIVE_ABOVE;
+  const useTrail = activeCount <= trailLimit;
   const [frame, setFrame] = useState<{
     phase: 'moving' | 'trailOnly';
     pos: Point;

@@ -5,7 +5,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { PLANT_CONTAINER_WIDTH, PLANT_CONTAINER_HEIGHT } from '../constants/boardLayout';
 import { assetPath } from '../utils/assetPath';
-import { shouldTick60 } from '../utils/raf60';
+import { shouldTick60, scheduleNextFrame } from '../utils/raf60';
+import { getPerformanceMode } from '../utils/performanceMode';
 
 const LEAF_SPRITES = [assetPath('/assets/vfx/particle_leaf_1.png'), assetPath('/assets/vfx/particle_leaf_2.png')];
 const LEAF_SPRITES_GOLD = [assetPath('/assets/vfx/particle_leaf_3.png'), assetPath('/assets/vfx/particle_leaf_4.png')];
@@ -108,10 +109,10 @@ export const LeafBurst: React.FC<LeafBurstProps> = ({ x, y, startTime, onComplet
         return;
       }
       if (!shouldTick60(raf60LastTickRef)) {
-        rafRef.current = requestAnimationFrame(tick);
+        rafRef.current = scheduleNextFrame(tick);
         return;
       }
-      const dtSec = 1 / 60;
+      const dtSec = getPerformanceMode() ? 1 / 30 : 1 / 60;
 
       posRef.current.forEach((p, i) => {
         const leaf = leaves[i];
@@ -176,10 +177,10 @@ export const LeafBurst: React.FC<LeafBurstProps> = ({ x, y, startTime, onComplet
           el.style.transform = `translate(-50%, -50%) scale(${p.scale}) rotate(${p.rotation}rad)`;
         });
       }
-      rafRef.current = requestAnimationFrame(tick);
+      rafRef.current = scheduleNextFrame(tick);
     };
 
-    rafRef.current = requestAnimationFrame(tick);
+    rafRef.current = scheduleNextFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
   }, [startTime, leaves]);
 

@@ -3,6 +3,7 @@
  * Title, stacked buttons. X and backdrop to close.
  */
 import React, { useState, useEffect } from 'react';
+import { getPerformanceMode, setPerformanceMode } from '../utils/performanceMode';
 
 interface PauseMenuPopupProps {
   isVisible: boolean;
@@ -32,6 +33,11 @@ export const PauseMenuPopup: React.FC<PauseMenuPopupProps> = ({
   const [animState, setAnimState] = useState<'hidden' | 'entering' | 'visible' | 'leaving'>('hidden');
   const [rewardedPressed, setRewardedPressed] = useState(false);
   const [levelUpPressed, setLevelUpPressed] = useState(false);
+  const [performanceMode, setPerformanceModeLocal] = useState(false);
+
+  useEffect(() => {
+    if (isVisible) setPerformanceModeLocal(getPerformanceMode());
+  }, [isVisible]);
 
   useEffect(() => {
     if (isVisible && animState === 'hidden') {
@@ -132,6 +138,52 @@ export const PauseMenuPopup: React.FC<PauseMenuPopupProps> = ({
               >
                 Pause
               </h2>
+
+              {/* Performance mode toggle */}
+              <div
+                className="flex items-center justify-between w-full mt-4 px-1"
+                style={{ maxWidth: '200px' }}
+              >
+                <span
+                  className="font-semibold"
+                  style={{
+                    color: titleColor,
+                    fontFamily: 'Inter, sans-serif',
+                    fontSize: '0.875rem',
+                  }}
+                >
+                  Performance mode
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={performanceMode}
+                  onClick={() => {
+                    const next = !performanceMode;
+                    setPerformanceModeLocal(next);
+                    setPerformanceMode(next);
+                  }}
+                  className="relative rounded-full transition-colors shrink-0"
+                  style={{
+                    width: '44px',
+                    height: '24px',
+                    backgroundColor: performanceMode ? buttonBorderColor : 'rgba(0,0,0,0.2)',
+                    border: 'none',
+                  }}
+                >
+                  <span
+                    className="absolute top-1 rounded-full bg-white shadow transition-transform"
+                    style={{
+                      left: performanceMode ? '22px' : '4px',
+                      width: '18px',
+                      height: '18px',
+                      transform: 'translateY(-50%)',
+                      top: '50%',
+                    }}
+                  />
+                </button>
+              </div>
+
               <div className="flex flex-col items-center gap-3 w-full mt-6" style={{ maxWidth: '200px' }}>
                 <button
                   type="button"

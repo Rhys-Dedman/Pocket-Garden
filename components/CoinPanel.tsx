@@ -3,6 +3,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { assetPath } from '../utils/assetPath';
+import { getPerformanceMode } from '../utils/performanceMode';
 
 const REVEAL_MS = 220;
 const HOLD_MS = 250; // 0.25s at top before stagger
@@ -69,10 +70,11 @@ export const CoinPanel: React.FC<CoinPanelProps> = ({
   onComplete,
   activePanelCount = 1,
 }) => {
-  // Freeze at spawn: if we mounted with many panels, never show trail (avoids mid-flight switch → white straight artifact)
+  // Freeze at spawn: if we ever had "many" panels for current threshold, never show trail (avoids mid-flight switch)
   const skipTrailLifetimeRef = useRef(false);
-  if (activePanelCount > SKIP_TRAIL_WHEN_PANELS_ABOVE) skipTrailLifetimeRef.current = true;
-  const useTrail = activePanelCount <= SKIP_TRAIL_WHEN_PANELS_ABOVE && !skipTrailLifetimeRef.current;
+  const trailThreshold = getPerformanceMode() ? 4 : SKIP_TRAIL_WHEN_PANELS_ABOVE;
+  if (activePanelCount > trailThreshold) skipTrailLifetimeRef.current = true;
+  const useTrail = activePanelCount <= trailThreshold && !skipTrailLifetimeRef.current;
 
   const [phase, setPhase] = useState<'reveal' | 'hold' | 'moveToWallet' | 'trailOnly'>('reveal');
   const [pos, setPos] = useState<Point>({ x: data.startX, y: data.startY });
