@@ -27,6 +27,12 @@ export const isBonusSeedMaxed = (seedsState: SeedsState): boolean => {
   return level >= 10; // Max at level 10 (50%)
 };
 
+/** Seed Storage: cap at 10 (1 + level, so level 9 = 10). */
+export const isSeedStorageMaxed = (seedsState: SeedsState): boolean => {
+  const level = seedsState?.seed_storage?.level ?? 0;
+  return level >= 9;
+};
+
 /** Get the merge harvest chance percentage (5% per level, chance to harvest adjacent crops on merge) */
 export const getMergeHarvestChance = (cropsState: Record<string, UpgradeState>): number => {
   const level = cropsState.merge_harvest?.level ?? 0;
@@ -173,19 +179,19 @@ const UPGRADE_GROWTH_MULTIPLIER = 1.6;
 
 /** Strength multiplier per upgrade (how powerful the upgrade is). Used only in cost formula. */
 const UPGRADE_STRENGTH_MULTIPLIERS: Record<string, number> = {
-  seed_production: 1.8,
-  seed_storage: 1.8,
-  seed_surplus: 1.8,
-  bonus_seeds: 1.8,
-  harvest_speed: 1.8,
-  plot_expansion: 1.8,
-  crop_value: 1.8,
-  fertile_soil: 1.8,
-  merge_harvest: 1.8,
-  customer_speed: 1.8,
-  market_value: 1.8,
-  surplus_sales: 1.8,
-  happy_customer: 1.8,
+  seed_production: 2.0,
+  seed_storage: 2.0,
+  seed_surplus: 2.0,
+  bonus_seeds: 2.0,
+  harvest_speed: 2.0,
+  merge_harvest: 2.0,
+  customer_speed: 2.0,
+  surplus_sales: 2.5,
+  happy_customer: 2.5,
+  fertile_soil: 2.5,
+  plot_expansion: 3.5,
+  crop_value: 3.5,
+  market_value: 3.5,
 };
 
 const roundToNearest5 = (value: number): number => Math.round(value / 5) * 5;
@@ -274,7 +280,7 @@ const getSeedsUpgradeValue = (upgradeId: string, level: number, seedsState?: See
     case 'seed_production':
       return `${Math.min(10, 3 + level)}/min`;
     case 'seed_storage':
-      return `${1 + level}`; // +1 storage per upgrade
+      return `${Math.min(10, 1 + level)}`; // +1 per upgrade, cap 10
     case 'bonus_seeds':
       return `${level * 5}%`;
     case 'seed_surplus':
@@ -306,9 +312,9 @@ const getCropsUpgradeValue = (upgradeId: string, level: number): string | null =
 const getHarvestUpgradeValue = (upgradeId: string, level: number): string | null => {
   switch (upgradeId) {
     case 'customer_speed':
-      return `${Math.max(0, 10 - level)}s`;
+      return `${Math.max(0, 15 - 2 * level)}s`;
     case 'market_value':
-      return `${(1 + 0.5 * level).toFixed(1)}x`;
+      return `${(1 + 0.5 * Math.min(5, level)).toFixed(1)}x`;
     case 'surplus_sales':
       return `${(1 + 0.2 * level).toFixed(1)}x`;
     case 'happy_customer':
@@ -330,21 +336,26 @@ export const isCropYieldMaxed = (cropsState: Record<string, UpgradeState>): bool
   return level >= 9; // 1 + 9 = 10 max
 };
 
-/** Order Speed: goal loading time in seconds (10 base - 1 per level, min 0). Max at level 10. */
+/** Order Speed: goal loading time in seconds (15 base - 2 per level, min 0). Max at level 8. */
 export const getGoalLoadingSeconds = (harvestState: HarvestState): number => {
   const level = harvestState?.customer_speed?.level ?? 0;
-  return Math.max(0, 10 - level);
+  return Math.max(0, 15 - 2 * level);
 };
 
 export const isCustomerSpeedMaxed = (harvestState: Record<string, UpgradeState>): boolean => {
   const level = harvestState?.customer_speed?.level ?? 0;
-  return level >= 10; // 10 - 10 = 0s
+  return level >= 8; // 15 - 2*8 = 0s
 };
 
-/** Market Value: multiplier for goal completion coins (1.0 + 0.5 per level) */
+/** Market Value: multiplier for goal completion coins (1.0 + 0.5 per level). Capped at level 5 (3.5x). */
 export const getMarketValueMultiplier = (harvestState: HarvestState): number => {
   const level = harvestState?.market_value?.level ?? 0;
-  return 1 + 0.5 * level;
+  return 1 + 0.5 * Math.min(5, level);
+};
+
+export const isMarketValueMaxed = (harvestState: Record<string, UpgradeState>): boolean => {
+  const level = harvestState?.market_value?.level ?? 0;
+  return level >= 5;
 };
 
 /** Premium Orders: minimum level for 50% above chance (1 + level). When creating order, 50% chance plant is above this. */
@@ -908,6 +919,7 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
         // Check if this upgrade is maxed
         const isMaxed = 
           (upgrade.id === 'seed_production' && state.level >= 7) || // 3+7=10/min max
+          (upgrade.id === 'seed_storage' && isSeedStorageMaxed(stateMap as SeedsState)) ||
           (upgrade.id === 'harvest_speed' && state.level >= 7) || // 3+7=10/min max
           (upgrade.id === 'bonus_seeds' && isBonusSeedMaxed(stateMap as SeedsState)) ||
           (upgrade.id === 'plot_expansion' && isPlotExpansionMaxed(lockedCellCount)) ||
@@ -915,6 +927,7 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
           (upgrade.id === 'crop_value' && isCropYieldMaxed(stateMap)) ||
           (upgrade.id === 'merge_harvest' && isMergeHarvestMaxed(stateMap)) ||
           (upgrade.id === 'customer_speed' && isCustomerSpeedMaxed(stateMap)) ||
+          (upgrade.id === 'market_value' && isMarketValueMaxed(stateMap)) ||
           (upgrade.id === 'happy_customer' && isHappyCustomerMaxed(stateMap));
         
         const descTextColor = '#c2b180';

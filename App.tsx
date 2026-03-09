@@ -48,12 +48,12 @@ const formatGoalCoin = (amount: number): string => {
 const getMaxGoalSlots = (playerLevel: number): number =>
   playerLevel >= 9 ? 5 : playerLevel >= 5 ? 4 : 3;
 
-/** Goals required to level up. Start at 5 for level 1→2; each level = round(previous × 1.25) */
+/** Goals required to level up. Start at 5 for level 1→2; each level = round(previous × 1.4) */
 const getGoalsRequiredForLevel = (level: number): number => {
   if (level <= 1) return 5;
   let prev = 5;
   for (let i = 2; i <= level; i++) {
-    prev = Math.round(prev * 1.25);
+    prev = Math.round(prev * 1.4);
   }
   return prev;
 };
@@ -321,7 +321,7 @@ export default function App() {
   // Goals: start with 3 slots; unlock 4th at level 5, 5th at level 9
   const [goalSlots, setGoalSlots] = useState<('empty' | 'loading' | 'green' | 'completed')[]>(['green', 'green', 'green', 'empty', 'empty']);
   const [goalPlantTypes, setGoalPlantTypes] = useState<number[]>([1, 2, 3, 0, 0]); // plant level 1-5 per slot when green
-  const [goalLoadingSeconds, setGoalLoadingSeconds] = useState(10); // countdown 10->0 (Order Speed)
+  const [goalLoadingSeconds, setGoalLoadingSeconds] = useState(15); // countdown 15->0 (Order Speed: 15 base - 2 per level)
   const [goalTransitionSlot, setGoalTransitionSlot] = useState<number | null>(null); // slot transitioning loading->green (for fade)
   const [goalTransitionFade, setGoalTransitionFade] = useState(false); // triggers fade: loading out, green in
   const [goalSlotFadeInSlot, setGoalSlotFadeInSlot] = useState<number | null>(null); // slot fading in 0→100% over 500ms; countdown waits until done
@@ -361,7 +361,7 @@ export default function App() {
   const [harvestBounceTrigger, setHarvestBounceTrigger] = useState(0); // increment each harvest so bounce animation re-runs
 
   const seedStorageLevel = seedsState?.seed_storage?.level ?? 0;
-  const seedStorageMax = 1 + seedStorageLevel; // +1 storage per upgrade
+  const seedStorageMax = Math.min(10, 1 + seedStorageLevel); // +1 per upgrade, cap 10
   const seedLevel = getSeedLevelFromHighestPlant(highestPlantEver); // Seed level scales with highest plant discovered
   
   const gridRef = useRef<BoardCell[]>([]);
@@ -982,7 +982,7 @@ export default function App() {
         const amountRequired = getGoalCropRequired(playerLevel, cropYieldLevel);
         const plantValue = getCoinValueForLevel(highestPlantEver);
         const marketMultiplier = getMarketValueMultiplier(harvestState);
-        const rawValue = plantValue * amountRequired * 2 * marketMultiplier * 1.5;
+        const rawValue = plantValue * amountRequired * 2 * marketMultiplier * 1.0;
         const roundedValue = Math.round(rawValue / 5) * 5;
         setCoinGoalValue(roundedValue);
         setCoinGoalTimeRemaining(30);
