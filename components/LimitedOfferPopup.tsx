@@ -42,6 +42,10 @@ interface LimitedOfferPopupProps {
   appScale?: number;
   /** When set, show "active boost" view: brown disabled-style button with "Active: XXs" countdown; button does nothing */
   activeBoostEndTime?: number;
+  /** When set (and not null), show "Duration: X min" below description, above button. Null = hide duration section. */
+  durationMinutes?: number | null;
+  /** When set (and not null), show "Duration: Xs" (e.g. "90s"). Takes precedence over durationMinutes for display. */
+  durationSeconds?: number | null;
 }
 
 const POPUP_LEAF_COUNT = 40;
@@ -116,6 +120,8 @@ export const LimitedOfferPopup: React.FC<LimitedOfferPopupProps> = ({
   closeOnBackdropClick = true,
   appScale = 1,
   activeBoostEndTime,
+  durationMinutes,
+  durationSeconds,
 }) => {
   const [animState, setAnimState] = useState<'hidden' | 'entering' | 'visible' | 'leaving'>('hidden');
   const [assetsReady, setAssetsReady] = useState(false);
@@ -418,14 +424,14 @@ export const LimitedOfferPopup: React.FC<LimitedOfferPopupProps> = ({
             className="absolute inset-0 w-full h-full object-contain"
             style={{ filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.25))' }}
           />
-          {/* Plant image inside header */}
+          {/* Plant image inside header - same size as level-up unlock popup (75px) */}
           <img
             src={imageSrc}
             alt=""
             className="relative object-contain"
             style={{
-              width: '94px',  /* 85px * 1.1 = ~94px (10% larger) */
-              height: '94px',
+              width: '75px',
+              height: '75px',
               filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))',
               marginTop: '-4px',
             }}
@@ -511,6 +517,38 @@ export const LimitedOfferPopup: React.FC<LimitedOfferPopupProps> = ({
           >
             {description}
           </p>
+
+          {/* Duration (only when not N/A): same color as "Limited Offer" title; extra spacing above */}
+          {(durationSeconds != null && durationSeconds > 0) && (
+            <p
+              className="font-semibold text-center w-full"
+              style={{
+                color: '#c2b280',
+                fontFamily: 'Inter, sans-serif',
+                paddingLeft: '24px',
+                paddingRight: '24px',
+                marginTop: '20px',
+                fontSize: '1.75rem',
+              }}
+            >
+              Duration: {durationSeconds}s
+            </p>
+          )}
+          {(durationSeconds == null || durationSeconds <= 0) && durationMinutes != null && durationMinutes > 0 && (
+            <p
+              className="font-semibold text-center w-full"
+              style={{
+                color: '#c2b280',
+                fontFamily: 'Inter, sans-serif',
+                paddingLeft: '24px',
+                paddingRight: '24px',
+                marginTop: '20px',
+                fontSize: '1.75rem',
+              }}
+            >
+              Duration: {durationMinutes} min
+            </p>
+          )}
 
           {/* Spacer */}
           <div className="flex-grow min-h-[48px]" />

@@ -11,6 +11,8 @@ const GAME_DESIGN_HEIGHT = 796;
 interface FakeAdPopupProps {
   isVisible: boolean;
   onComplete: () => void;
+  /** Called with the Activate Reward button rect (screen coords) when user clicks it; use to spawn particle. */
+  onActivateRewardClick?: (buttonRect: DOMRect) => void;
   /** Scale factor so ad matches game area size (same as app scale) */
   appScale?: number;
 }
@@ -22,7 +24,7 @@ const BUTTON_BORDER = '#f59d42';
 const BUTTON_TEXT_COLOR = '#e6803a';
 const BUTTON_PRESSED_BG = '#f0c840';
 
-export const FakeAdPopup: React.FC<FakeAdPopupProps> = ({ isVisible, onComplete, appScale = 1 }) => {
+export const FakeAdPopup: React.FC<FakeAdPopupProps> = ({ isVisible, onComplete, onActivateRewardClick, appScale = 1 }) => {
   const [buttonPressed, setButtonPressed] = useState(false);
 
   if (!isVisible) return null;
@@ -78,13 +80,15 @@ export const FakeAdPopup: React.FC<FakeAdPopupProps> = ({ isVisible, onComplete,
           </div>
 
           {/* Bottom: Complete ad button (same style as Accept Offer but no icon) */}
-          <div className="w-full flex justify-center pb-10 px-4 flex-shrink-0">
+          <div className="w-full flex justify-center px-4 flex-shrink-0" style={{ paddingBottom: '6rem' }}>
             <button
               onMouseDown={() => setButtonPressed(true)}
               onMouseUp={() => setButtonPressed(false)}
               onMouseLeave={() => setButtonPressed(false)}
-              onClick={() => {
+              onClick={(e) => {
                 setButtonPressed(false);
+                const rect = e.currentTarget.getBoundingClientRect();
+                onActivateRewardClick?.(rect);
                 onComplete();
               }}
               className="relative flex items-center justify-center rounded-xl transition-all"

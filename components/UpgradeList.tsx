@@ -113,6 +113,8 @@ interface UpgradeListProps {
   pendingOfferHighlightId?: string | null;
   /** When true, panel is expanded (use stronger ease-out for opening) */
   isExpanded?: boolean;
+  /** Offer id whose popup is currently open; don't remove that offer from the list when timer hits 0 until popup is closed */
+  protectedOfferId?: string | null;
 }
 
 interface UpgradeDef {
@@ -415,7 +417,7 @@ export const createInitialHarvestState = (): Record<string, UpgradeState> => ({
   happy_customer: { level: 0, progress: 0 },
 });
 
-export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange, money, setMoney, seedsState: propsSeedsState, setSeedsState: propsSetSeedsState, harvestState: propsHarvestState, setHarvestState: propsSetHarvestState, cropsState: propsCropsState, setCropsState: propsSetCropsState, lockedCellCount = 0, onUnlockCell, fertilizableCellCount = 0, onFertilizeCell, highestPlantEver = 1, rewardedOffers = [], onRewardedOfferPanelClick, onRewardedOfferClick, playerLevel = 1, pendingUnlockUpgradeId = null, pendingOfferHighlightId = null, isExpanded = false }) => {
+export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange, money, setMoney, seedsState: propsSeedsState, setSeedsState: propsSetSeedsState, harvestState: propsHarvestState, setHarvestState: propsSetHarvestState, cropsState: propsCropsState, setCropsState: propsSetCropsState, lockedCellCount = 0, onUnlockCell, fertilizableCellCount = 0, onFertilizeCell, highestPlantEver = 1, rewardedOffers = [], onRewardedOfferPanelClick, onRewardedOfferClick, playerLevel = 1, pendingUnlockUpgradeId = null, pendingOfferHighlightId = null, isExpanded = false, protectedOfferId = null }) => {
   const [internalSeedsState, setInternalSeedsState] = useState<Record<string, UpgradeState>>(createInitialSeedsState);
   const seedsState = propsSeedsState ?? internalSeedsState;
   const setSeedsState = propsSetSeedsState ?? setInternalSeedsState;
@@ -762,9 +764,8 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
 
   const renderRewardedOfferItem = (offer: RewardedOffer) => {
     const formatTime = (seconds: number) => {
-      const mins = Math.floor(seconds / 60);
-      const secs = seconds % 60;
-      return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      const s = Math.max(0, seconds);
+      return `${s}s`;
     };
 
     // Light yellow default (#fde8a1); full yellow only during temporary flash when scroll lands
@@ -786,9 +787,13 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
         }}
       >
         <div className="flex items-center p-1.5 px-3">
-          {/* Square Icon Box */}
-          <div className="w-[38px] h-[38px] shrink-0 flex items-center justify-center bg-[#764f40] rounded-[8px] shadow-sm">
-            <span className="text-[22px] leading-none select-none">{offer.icon}</span>
+          {/* Square Icon Box - same size as standard upgrade icon (30px); emoji or image */}
+          <div className="w-[38px] h-[38px] shrink-0 flex items-center justify-center bg-[#764f40] rounded-[8px] shadow-sm overflow-hidden">
+            {offer.icon.startsWith('/') || offer.icon.includes('.png') ? (
+              <img src={assetPath(offer.icon)} alt="" className="w-[30px] h-[30px] object-contain" />
+            ) : (
+              <span className="text-[22px] leading-none select-none">{offer.icon}</span>
+            )}
           </div>
           
           {/* Text Content */}

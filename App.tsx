@@ -30,6 +30,7 @@ import { ButtonLeafBurst } from './components/ButtonLeafBurst';
 import { LoadingScreen } from './components/LoadingScreen';
 import { TabType, ScreenType, BoardCell, Item, DragState } from './types';
 import { assetPath } from './utils/assetPath';
+import { LIMITED_OFFERS, getOfferById } from './offers';
 
 /** Coin per plant level: level 1 = 5, level 2 = 10, level 3 = 20, ... */
 export function getCoinValueForLevel(level: number): number {
@@ -60,20 +61,23 @@ const getGoalsRequiredForLevel = (level: number): number => {
 /** Goal difficulty scaling: 0.9 = easier, 1.0 = normal, 1.1 = harder, 1.2 = much harder */
 const GOAL_DIFFICULTY_SCALING = 1.0;
 
-/** Content for limited offer popup by offerId (used when opening from active boost tap). Add new offers here. */
-function getLimitedOfferContent(offerId: string): { title?: string; imageSrc: string; subtitle: string; description: string; buttonText: string; tab: TabType } | null {
-  switch (offerId) {
-    case 'super_seed_offer':
-      return {
-        imageSrc: assetPath('/assets/plants/plant_2.png'),
-        subtitle: 'SUPER SEED',
-        description: 'Spawn 10 seeds instantly onto the board',
-        buttonText: 'Watch Ad',
-        tab: 'SEEDS',
-      };
-    default:
-      return null;
-  }
+/** Build limited offer popup state from offer id (uses offers.ts config). */
+function buildLimitedOfferPopupState(offerId: string, overrides?: { activeBoostEndTime?: number }): { isVisible: boolean; title: string; imageSrc: string; subtitle: string; description: string; buttonText: string; offerId: string; tab: TabType; durationMinutes: number | null; durationSeconds?: number | null; activeBoostEndTime?: number } | null {
+  const offer = getOfferById(offerId);
+  if (!offer) return null;
+  return {
+    isVisible: true,
+    title: 'Limited Offer',
+    imageSrc: assetPath(offer.headerIcon),
+    subtitle: offer.title,
+    description: offer.description,
+    buttonText: 'Accept Offer',
+    offerId: offer.id,
+    tab: offer.upgradeTab,
+    durationMinutes: offer.durationMinutes,
+    durationSeconds: offer.durationSeconds ?? null,
+    ...overrides,
+  };
 }
 
 /** Discovery goal frequency: every X goals show a +1 plant goal. Based on highest plant level. */
@@ -277,7 +281,13 @@ export default function App() {
   // Plant info popup state (for barn)
   const [plantInfoPopup, setPlantInfoPopup] = useState<{ isVisible: boolean; level: number } | null>(null);
   // Limited offer popup state
-  const [limitedOfferPopup, setLimitedOfferPopup] = useState<{ isVisible: boolean; title?: string; imageSrc: string; subtitle: string; description: string; buttonText: string; offerId?: string; tab?: TabType; /** When set, popup is "active boost" view: brown button with countdown, button does nothing */ activeBoostEndTime?: number } | null>(null);
+  const [limitedOfferPopup, setLimitedOfferPopup] = useState<{ isVisible: boolean; title?: string; imageSrc: string; subtitle: string; description: string; buttonText: string; offerId?: string; tab?: TabType; durationMinutes?: number | null; durationSeconds?: number | null; activeBoostEndTime?: number } | null>(null);
+  const lastLimitedOfferShownAtRef = useRef<number>(0);
+  const lastShownOfferIdRef = useRef<string | null>(null);
+  const lastLimitedOfferClosedAtRef = useRef<number>(0);
+  const lastFakeAdClosedAtRef = useRef<number>(0); // 10s cooldown before showing limited offer popup after closing fake ad
+  const showFakeAdRef = useRef<boolean>(false); // so timers can pause while fake ad is visible
+  const limitedOfferCooldownInitializedRef = useRef(false);
   // Rewarded offers shown in upgrade list (when player declines popup)
   const [rewardedOffers, setRewardedOffers] = useState<RewardedOffer[]>([]);
   // Barn particles for "Add to Barn" button
@@ -294,6 +304,7 @@ export default function App() {
   const [pauseMenuOpen, setPauseMenuOpen] = useState(false);
   // Fake ad popup: show full-screen "ad", on Complete ad run callback then close
   const [showFakeAd, setShowFakeAd] = useState(false);
+  showFakeAdRef.current = showFakeAd;
   const [pendingAdComplete, setPendingAdComplete] = useState<(() => void) | null>(null);
   // Ref for upgrade tabs to get tab element positions
   const upgradeTabsRef = useRef<UpgradeTabsRef>(null);
@@ -322,6 +333,15 @@ export default function App() {
   const goalIconRef3 = useRef<HTMLImageElement>(null);
   const goalIconRef4 = useRef<HTMLImageElement>(null);
   const goalIconRefs = [goalIconRef0, goalIconRef1, goalIconRef2, goalIconRef3, goalIconRef4];
+  // Coin goal: always in 5th slot (index 4), 30s timer, 30s between spawns, tap → fake ad → explode to wallet
+  const [coinGoalVisible, setCoinGoalVisible] = useState(false);
+  const [coinGoalValue, setCoinGoalValue] = useState(0);
+  const [coinGoalTimeRemaining, setCoinGoalTimeRemaining] = useState(30);
+  const [coinGoalBounce, setCoinGoalBounce] = useState(false);
+  const coinGoalIconRef = useRef<HTMLImageElement>(null);
+  const lastCoinGoalHiddenAtRef = useRef<number>(Date.now());
+  const nextCoinGoalDelayRef = useRef<number>(30000 + Math.random() * 30000); // 30–60s until next spawn, new random each hide
+  const pendingAdSourceRef = useRef<'limitedOffer' | 'upgradeList' | 'coinGoal' | null>(null);
   const [activePlantPanels, setActivePlantPanels] = useState<PlantPanelData[]>([]);
   const [fertilizingCellIndices, setFertilizingCellIndices] = useState<number[]>([]); // Cells currently playing fertilize animation
 
@@ -428,25 +448,73 @@ export default function App() {
     };
   }, []);
 
-// Countdown timer for rewarded offers (1 second tick)
+// Countdown timer for rewarded offers (1 second tick). Don't remove an offer at 0s while its popup is open. Pause while fake ad is visible.
+  const protectedOfferId = limitedOfferPopup?.isVisible ? (limitedOfferPopup?.offerId ?? null) : null;
   useEffect(() => {
     if (rewardedOffers.length === 0) return;
 
     const interval = setInterval(() => {
+      if (showFakeAdRef.current) return;
       setRewardedOffers(prev => {
         const updated = prev.map(offer => ({
           ...offer,
-          timeRemaining: offer.timeRemaining !== undefined ? offer.timeRemaining - 1 : undefined
+          timeRemaining: offer.timeRemaining !== undefined ? Math.max(0, offer.timeRemaining - 1) : undefined
         }));
 
-        // Filter out expired offers (timer reached 0)
-        return updated.filter(o => o.timeRemaining === undefined || o.timeRemaining > 0);
+        // Remove expired offers (timer reached 0), unless that offer's popup is currently open
+        return updated.filter(o => o.timeRemaining === undefined || o.timeRemaining > 0 || (protectedOfferId != null && o.id === protectedOfferId));
       });
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [rewardedOffers.length > 0]);
-  
+  }, [rewardedOffers.length > 0, protectedOfferId]);
+
+  // Auto-trigger limited offer popup: Rule 1 max 1 per 90s, Rule 2 never same twice in a row, Rule 3 after 90s pick best trigger else at 120s random, Rule 4 level >= 2 only
+  useEffect(() => {
+    if (playerLevel < 2 || LIMITED_OFFERS.length === 0) return;
+    if (!limitedOfferCooldownInitializedRef.current) {
+      limitedOfferCooldownInitializedRef.current = true;
+      lastLimitedOfferShownAtRef.current = Date.now();
+    }
+    const interval = setInterval(() => {
+      if (limitedOfferPopup?.isVisible) return;
+      if (showFakeAdRef.current) return; // never show limited offer while fake ad is on screen
+      const now = Date.now();
+      // Don't show another popup for 10s after user just closed one
+      if (lastLimitedOfferClosedAtRef.current && (now - lastLimitedOfferClosedAtRef.current) < 10000) return;
+      if (lastFakeAdClosedAtRef.current && (now - lastFakeAdClosedAtRef.current) < 10000) return;
+      const elapsed = now - lastLimitedOfferShownAtRef.current;
+      if (elapsed < 90000) return; // Rule 1: 90s cooldown
+      const unlockedCount = grid.filter(c => !c.locked).length;
+      const filledCount = grid.filter(c => !c.locked && c.item != null).length;
+      const gardenFillPercent = unlockedCount > 0 ? filledCount / unlockedCount : 0;
+      const lastId = lastShownOfferIdRef.current;
+      // Eligible: trigger matches and not same as last
+      const eligible = LIMITED_OFFERS.filter(o => {
+        if (o.id === lastId) return false;
+        if (o.trigger === 'garden_fill_max_50') return gardenFillPercent <= 0.5;
+        if (o.trigger === 'wallet_empty') return money === 0;
+        return false;
+      });
+      let offerToShow: typeof LIMITED_OFFERS[0] | null = null;
+      if (eligible.length > 0) {
+        offerToShow = eligible[0];
+      } else if (elapsed >= 120000) {
+        const other = LIMITED_OFFERS.filter(o => o.id !== lastId);
+        if (other.length > 0) offerToShow = other[Math.floor(Math.random() * other.length)];
+      }
+      if (offerToShow) {
+        const state = buildLimitedOfferPopupState(offerToShow.id);
+        if (state) {
+          setLimitedOfferPopup(state);
+          lastShownOfferIdRef.current = offerToShow.id;
+          // 90s cooldown starts when user closes popup (timer starts), not when we show it
+        }
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [playerLevel, grid, money, limitedOfferPopup?.isVisible]);
+
   // Derive which tabs have offers (for tab notification coloring)
   const tabsWithOffers = new Set(rewardedOffers.map(o => o.tab));
   
@@ -843,6 +911,53 @@ export default function App() {
       }
     }
   }, [playerLevel, isLoading, goalSlots, harvestState]);
+
+  // Coin goal: show after 30–60s (random) since last hide; only from level 2; repeats forever
+  useEffect(() => {
+    if (playerLevel < 2 || coinGoalVisible) return;
+    const interval = setInterval(() => {
+      const now = Date.now();
+      if (now - lastCoinGoalHiddenAtRef.current >= nextCoinGoalDelayRef.current) {
+        const cropYieldLevel = cropsState?.crop_value?.level ?? 0;
+        const amountRequired = getGoalCropRequired(playerLevel, cropYieldLevel);
+        const plantValue = getCoinValueForLevel(highestPlantEver);
+        const marketMultiplier = getMarketValueMultiplier(harvestState);
+        const rawValue = plantValue * amountRequired * 2 * marketMultiplier * 1.5;
+        const roundedValue = Math.round(rawValue / 5) * 5;
+        setCoinGoalValue(roundedValue);
+        setCoinGoalTimeRemaining(30);
+        setCoinGoalVisible(true);
+        setCoinGoalBounce(true);
+        setTimeout(() => setCoinGoalBounce(false), 400);
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [coinGoalVisible, playerLevel, highestPlantEver, cropsState, harvestState]);
+  // Hide coin goal if player drops below level 2
+  useEffect(() => {
+    if (playerLevel < 2 && coinGoalVisible) {
+      setCoinGoalVisible(false);
+      lastCoinGoalHiddenAtRef.current = Date.now();
+      nextCoinGoalDelayRef.current = 30000 + Math.random() * 30000;
+    }
+  }, [playerLevel, coinGoalVisible]);
+
+  // Coin goal: 30s countdown; at 0 hide and schedule next spawn (30–60s random). Pause while fake ad is visible.
+  useEffect(() => {
+    if (!coinGoalVisible) return;
+    const interval = setInterval(() => {
+      if (showFakeAdRef.current) return;
+      setCoinGoalTimeRemaining((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [coinGoalVisible]);
+  useEffect(() => {
+    if (!coinGoalVisible || coinGoalTimeRemaining > 0) return;
+    lastCoinGoalHiddenAtRef.current = Date.now();
+    nextCoinGoalDelayRef.current = 30000 + Math.random() * 30000;
+    setCoinGoalVisible(false);
+    setCoinGoalTimeRemaining(30);
+  }, [coinGoalVisible, coinGoalTimeRemaining]);
 
   // When seed level increases: auto-complete goals below seed level (give full coin value), auto-level plants below seed level (with beam VFX)
   useEffect(() => {
@@ -1893,15 +2008,10 @@ export default function App() {
                     });
                     setPlayerLevelFlashTrigger((t) => t + 1);
                   }}
-                  onGiftClick={() => setLimitedOfferPopup({
-                    isVisible: true,
-                    offerId: 'super_seed_offer',
-                    tab: 'SEEDS',
-                    imageSrc: assetPath('/assets/plants/plant_2.png'),
-                    subtitle: 'SUPER SEED',
-                    description: 'Spawn 10 seeds instantly onto the board',
-                    buttonText: 'Watch Ad',
-                  })}
+                  onGiftClick={() => {
+                    const state = buildLimitedOfferPopupState('seed_storm');
+                    if (state) setLimitedOfferPopup(state);
+                  }}
                   onPauseClick={() => setPauseMenuOpen(true)}
                   activeBoosts={activeBoosts}
                   activeBoostAreaRef={activeBoostAreaRef}
@@ -1923,14 +2033,8 @@ export default function App() {
                   }}
                   onBoostClick={(boost) => {
                     if (!boost.offerId) return;
-                    const content = getLimitedOfferContent(boost.offerId);
-                    if (!content) return;
-                    setLimitedOfferPopup({
-                      isVisible: true,
-                      ...content,
-                      offerId: boost.offerId,
-                      activeBoostEndTime: boost.endTime,
-                    });
+                    const state = buildLimitedOfferPopupState(boost.offerId, { activeBoostEndTime: boost.endTime });
+                    if (state) setLimitedOfferPopup(state);
                   }}
                 />
               </div>
@@ -2097,6 +2201,69 @@ export default function App() {
                     </div>
                   );
                 })}
+                {/* Coin goal: always 5th slot (index 4), yellow bg, 30s radial, tap → fake ad → explode to wallet */}
+                {coinGoalVisible && playerLevel >= 2 && (
+                  <div
+                    className={`absolute goal-slide-over pointer-events-auto cursor-pointer ${coinGoalBounce ? 'goal-bounce' : ''}`}
+                    style={{
+                      width: '105px',
+                      height: '210px',
+                      marginRight: '-30px',
+                      marginTop: '-25px',
+                      left: 4 * 75,
+                      zIndex: 10,
+                    }}
+                    onClick={() => {
+                      if (showFakeAd) return;
+                      pendingAdSourceRef.current = 'coinGoal';
+                      setShowFakeAd(true);
+                      setPendingAdComplete(() => () => {
+                        pendingAdSourceRef.current = null;
+                        const iconEl = coinGoalIconRef.current;
+                        const container = containerRef.current;
+                        if (iconEl && container) {
+                          const r = iconEl.getBoundingClientRect();
+                          const cr = container.getBoundingClientRect();
+                          const startX = (r.left + r.width / 2 - cr.left) / appScale;
+                          const startY = (r.top + r.height / 2 - cr.top) / appScale;
+                          setGoalCoinLeafBursts((prev) => [...prev, {
+                            id: `goal-coin-lb-${nextGoalCoinBurstIdRef.current++}`,
+                            x: r.left + r.width / 2,
+                            y: r.top + r.height / 2 + 30,
+                            startTime: Date.now(),
+                          }]);
+                          setActiveGoalCoinParticles((prev) => [...prev, { id: `coin-goal-${Date.now()}`, startX, startY, value: coinGoalValue }]);
+                          setMoney((m) => m + coinGoalValue);
+                        }
+                        lastCoinGoalHiddenAtRef.current = Date.now();
+                        nextCoinGoalDelayRef.current = 30000 + Math.random() * 30000;
+                        setCoinGoalVisible(false);
+                        setCoinGoalTimeRemaining(30);
+                      });
+                    }}
+                  >
+                    <img src={assetPath('/assets/goals/goal_shadow.png')} alt="" className="absolute inset-0 w-full h-full object-contain object-top" style={{ zIndex: 1, opacity: 0.4 }} />
+                    <img src={assetPath('/assets/goals/goal_yellow.png')} alt="" className="absolute inset-0 w-full h-full object-contain object-top" style={{ zIndex: 2 }} />
+                    <div className="absolute left-1/2 pointer-events-none" style={{ zIndex: 6, bottom: '70%', width: 42, height: 42, transform: 'translate(-50%, -1px)' }}>
+                      <svg width="42" height="42" viewBox="0 0 42 42" className="absolute left-0 top-0 block" style={{ transform: 'rotate(-90deg)' }}>
+                        <circle cx="21" cy="21" r="20" fill="transparent" stroke="#ea9940" strokeWidth="2.5" />
+                        <circle
+                          cx="21"
+                          cy="21"
+                          r="20"
+                          fill="transparent"
+                          stroke="#c77d34"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeDasharray={2 * Math.PI * 20}
+                          style={{ strokeDashoffset: 2 * Math.PI * 20 * (1 - Math.max(0, coinGoalTimeRemaining) / 30), transition: 'stroke-dashoffset 0.2s linear' }}
+                        />
+                      </svg>
+                      <img ref={coinGoalIconRef} src={assetPath('/assets/icons/icon_coin_watchad.png')} alt="" className="object-contain absolute z-[1]" style={{ left: 1, top: 1, width: 40, height: 40, pointerEvents: 'none' }} />
+                    </div>
+                    <span className="absolute left-1/2 font-bold pointer-events-none" style={{ zIndex: 6, bottom: '62%', color: '#c77d34', fontSize: '13px', transform: 'translate(-50%, -1px)' }}>{formatGoalCoin(coinGoalValue)}</span>
+                  </div>
+                )}
                 </div>
               </div>
 
@@ -2326,20 +2493,10 @@ export default function App() {
                     pendingUnlockUpgradeId={pendingUnlockUpgradeId}
                     pendingOfferHighlightId={pendingOfferHighlightId}
                     isExpanded={isExpanded}
+                    protectedOfferId={limitedOfferPopup?.isVisible && limitedOfferPopup?.offerId ? limitedOfferPopup.offerId : null}
                     onRewardedOfferPanelClick={(offerId) => {
-                      // Tap on panel: reopen the limited offer popup
-                      const offer = rewardedOffers.find(o => o.id === offerId);
-                      if (offer) {
-                        setLimitedOfferPopup({
-                          isVisible: true,
-                          offerId: offer.id,
-                          tab: offer.tab,
-                          imageSrc: assetPath('/assets/plants/plant_2.png'),
-                          subtitle: offer.name,
-                          description: offer.description,
-                          buttonText: 'Watch Ad',
-                        });
-                      }
+                      const state = buildLimitedOfferPopupState(offerId);
+                      if (state) setLimitedOfferPopup(state);
                     }}
                     onRewardedOfferClick={(offerId) => {
                       // Tap on Watch Ad button: open fake ad directly (skip popup), grant reward on Activate Reward
@@ -2702,32 +2859,43 @@ export default function App() {
               <LimitedOfferPopup
                 isVisible={limitedOfferPopup.isVisible}
                 onClose={() => {
+                  const now = Date.now();
+                  lastLimitedOfferClosedAtRef.current = now;
+                  lastLimitedOfferShownAtRef.current = now; // start 90s cooldown for next offer when timer starts
                   setLimitedOfferPopup(null);
                 }}
                 closeOnButtonClick={false}
                 onCloseButtonClick={() => {
                   if (limitedOfferPopup.activeBoostEndTime != null) {
+                    const now = Date.now();
+                    lastLimitedOfferClosedAtRef.current = now;
+                    lastLimitedOfferShownAtRef.current = now;
                     setLimitedOfferPopup(null);
                     return;
                   }
                   // Open upgrade panel, scroll to offer, flash yellow and keep yellow (same behaviour as unlock)
                   if (limitedOfferPopup.offerId) {
                     const offerId = limitedOfferPopup.offerId;
-                    const offerTab = limitedOfferPopup.tab ?? 'SEEDS';
-                    setRewardedOffers(prev => {
-                      if (prev.some(o => o.id === offerId)) return prev;
-                      return [...prev, {
-                        id: offerId,
-                        name: limitedOfferPopup.subtitle,
-                        icon: '📦',
-                        description: limitedOfferPopup.description,
-                        tab: offerTab,
-                        timeRemaining: 60,
-                      }];
-                    });
-                    setIsExpanded(true);
-                    setActiveTab(offerTab);
-                    setPendingOfferHighlightId(offerId);
+                    const offerConfig = getOfferById(offerId);
+                    if (offerConfig) {
+                      setRewardedOffers(prev => {
+                        if (prev.some(o => o.id === offerId)) return prev;
+                        return [...prev, {
+                          id: offerConfig.id,
+                          name: offerConfig.title,
+                          icon: offerConfig.headerIcon,
+                          description: offerConfig.description,
+                          tab: offerConfig.upgradeTab,
+                          timeRemaining: 60,
+                        }];
+                      });
+                      setIsExpanded(true);
+                      setActiveTab(offerConfig.upgradeTab);
+                      setPendingOfferHighlightId(offerId);
+                    }
+                    const now = Date.now();
+                    lastLimitedOfferClosedAtRef.current = now;
+                    lastLimitedOfferShownAtRef.current = now;
                     setLimitedOfferPopup(null);
                     setTimeout(() => setPendingOfferHighlightId(null), 2500);
                   }
@@ -2739,6 +2907,8 @@ export default function App() {
                 buttonText={limitedOfferPopup.buttonText}
                 appScale={appScale}
                 activeBoostEndTime={limitedOfferPopup.activeBoostEndTime}
+                durationMinutes={limitedOfferPopup.durationMinutes}
+                durationSeconds={limitedOfferPopup.durationSeconds}
                 onButtonClick={() => {
                   // Show fake ad; when user taps "Complete ad", grant reward and close popup
                   const offerId = limitedOfferPopup.offerId;
@@ -2747,6 +2917,9 @@ export default function App() {
                     if (offerId) {
                       setRewardedOffers(prev => prev.filter(o => o.id !== offerId));
                     }
+                    const now = Date.now();
+                    lastLimitedOfferClosedAtRef.current = now;
+                    lastLimitedOfferShownAtRef.current = now;
                     setLimitedOfferPopup(null);
                     setShowFakeAd(false);
                   });
@@ -2759,6 +2932,7 @@ export default function App() {
               isVisible={showFakeAd}
               appScale={appScale}
               onActivateRewardClick={(buttonRect) => {
+                if (pendingAdSourceRef.current === 'coinGoal') return;
                 const wrapper = headerLeftWrapperRef.current;
                 if (!wrapper) return;
                 const wr = wrapper.getBoundingClientRect();
@@ -2775,9 +2949,11 @@ export default function App() {
                 ]);
               }}
               onComplete={() => {
-                pendingAdComplete?.();
+                lastFakeAdClosedAtRef.current = Date.now();
+                const applyReward = pendingAdComplete;
                 setPendingAdComplete(null);
                 setShowFakeAd(false);
+                setTimeout(() => applyReward?.(), 250);
               }}
             />
 
@@ -2786,15 +2962,8 @@ export default function App() {
               isVisible={pauseMenuOpen}
               onClose={() => setPauseMenuOpen(false)}
               onRewardedAdClick={() => {
-                setLimitedOfferPopup({
-                  isVisible: true,
-                  offerId: 'super_seed_offer',
-                  tab: 'SEEDS',
-                  imageSrc: assetPath('/assets/plants/plant_2.png'),
-                  subtitle: 'SUPER SEED',
-                  description: 'Spawn 10 seeds instantly onto the board',
-                  buttonText: 'Watch Ad',
-                });
+                const state = buildLimitedOfferPopupState('seed_storm');
+                if (state) setLimitedOfferPopup(state);
               }}
               onLevelUpClick={() => {
                 setPlayerLevelProgress((prev) => {
@@ -3015,7 +3184,7 @@ export default function App() {
                           endTime: Date.now() + durationMs,
                           durationMs,
                           icon: 'icon_seedstorage',
-                          offerId: 'super_seed_offer',
+                          offerId: 'seed_storm',
                         },
                       ];
                     });
