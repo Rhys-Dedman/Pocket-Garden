@@ -46,9 +46,9 @@ const formatGoalCoin = (amount: number): string => {
   return amount.toString();
 };
 
-/** Max goal slots: 3 until level 5, then 4 until level 7, then 5 */
+/** Max plant goal slots: 3 until level 5, then 4. Slot 4 (5th) is reserved for coin goal only. */
 const getMaxGoalSlots = (playerLevel: number): number =>
-  playerLevel >= 9 ? 5 : playerLevel >= 5 ? 4 : 3;
+  playerLevel >= 5 ? 4 : 3;
 
 /** Goals required to level up. Start at 5 for level 1→2; each level = round(previous × 1.4) */
 const getGoalsRequiredForLevel = (level: number): number => {
@@ -320,7 +320,7 @@ export default function App() {
   // Barn notification state - shows when a new plant is added to barn
   const [barnNotification, setBarnNotification] = useState(false);
   const [unlockingCellIndices, setUnlockingCellIndices] = useState<number[]>([]); // Cells currently playing unlock animation
-  // Goals: start with 3 slots; unlock 4th at level 5, 5th at level 9
+  // Goals: 3 slots initially; unlock 4th plant goal at level 5. Slot 4 (5th) is coin goal only.
   const [goalSlots, setGoalSlots] = useState<('empty' | 'loading' | 'green' | 'completed')[]>(['green', 'green', 'green', 'empty', 'empty']);
   const [goalPlantTypes, setGoalPlantTypes] = useState<number[]>([1, 2, 3, 0, 0]); // plant level 1-5 per slot when green
   const [goalLoadingSeconds, setGoalLoadingSeconds] = useState(15); // countdown 15->0 (Order Speed: 15 base - 2 per level)
