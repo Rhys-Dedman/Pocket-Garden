@@ -69,6 +69,7 @@ export const ButtonLeafBurst: React.FC<ButtonLeafBurstProps> = ({ x, y, startTim
   const rafRef = useRef<number>(0);
   const completedRef = useRef(false);
   const onCompleteRef = useRef(onComplete);
+  const frameCountRef = useRef(0);
   onCompleteRef.current = onComplete;
 
   useEffect(() => {
@@ -147,9 +148,12 @@ export const ButtonLeafBurst: React.FC<ButtonLeafBurstProps> = ({ x, y, startTim
         p.scale = 1 - 0.4 * lifeProgress;
       });
 
-      setPositions(
-        posRef.current.map((p) => ({ x: p.x, y: p.y, opacity: p.opacity, rotation: p.rotation, scale: p.scale }))
-      );
+      frameCountRef.current += 1;
+      if (frameCountRef.current % 2 === 0) {
+        setPositions(
+          posRef.current.map((p) => ({ x: p.x, y: p.y, opacity: p.opacity, rotation: p.rotation, scale: p.scale }))
+        );
+      }
       rafRef.current = requestAnimationFrame(tick);
     };
 

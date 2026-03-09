@@ -68,6 +68,7 @@ export const UnlockBurst: React.FC<UnlockBurstProps> = ({ x, y, startTime, onCom
   const rafRef = useRef<number>(0);
   const completedRef = useRef(false);
   const onCompleteRef = useRef(onComplete);
+  const frameCountRef = useRef(0);
   onCompleteRef.current = onComplete;
 
   useEffect(() => {
@@ -143,9 +144,12 @@ export const UnlockBurst: React.FC<UnlockBurstProps> = ({ x, y, startTime, onCom
         p.scale = 1 - 0.5 * lifeProgress;
       });
 
-      setPositions(
-        posRef.current.map((p) => ({ x: p.x, y: p.y, opacity: p.opacity, rotation: p.rotation, scale: p.scale }))
-      );
+      frameCountRef.current += 1;
+      if (frameCountRef.current % 2 === 0) {
+        setPositions(
+          posRef.current.map((p) => ({ x: p.x, y: p.y, opacity: p.opacity, rotation: p.rotation, scale: p.scale }))
+        );
+      }
       rafRef.current = requestAnimationFrame(tick);
     };
 

@@ -7,7 +7,7 @@
  * - Fades in quickly, then slowly fades out
  * - Sparkles rise in a spiral pattern with eased velocity (fast then slow)
  */
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { assetPath } from '../utils/assetPath';
 
 interface CellHighlightBeamProps {
@@ -79,34 +79,34 @@ export const CellHighlightBeam: React.FC<CellHighlightBeamProps> = ({
     }));
   }, []);
 
+  const frameCountRef = useRef(0);
   useEffect(() => {
     let rafId: number;
     const animate = () => {
       const elapsed = Date.now() - startTime;
       const t = Math.min(1, elapsed / VFX_DURATION_MS);
-      
-      // Ease out for spiral progress (fast start, slows down)
       const easeOut = 1 - Math.pow(1 - t, 3);
-      setProgress(easeOut);
-      
-      // Sprite opacity: fast fade in, slow fade out
-      if (elapsed < FADE_IN_DURATION_MS) {
-        // Fast fade in (0 to 100% in FADE_IN_DURATION_MS)
-        setSpriteOpacity(elapsed / FADE_IN_DURATION_MS);
-      } else {
-        // Slow fade out over the rest of the duration
-        const fadeOutProgress = (elapsed - FADE_IN_DURATION_MS) / (VFX_DURATION_MS - FADE_IN_DURATION_MS);
-        setSpriteOpacity(Math.max(0, 1 - fadeOutProgress));
+      const opacity =
+        elapsed < FADE_IN_DURATION_MS
+          ? elapsed / FADE_IN_DURATION_MS
+          : Math.max(0, 1 - (elapsed - FADE_IN_DURATION_MS) / (VFX_DURATION_MS - FADE_IN_DURATION_MS));
+
+      frameCountRef.current += 1;
+      if (frameCountRef.current % 2 === 0) {
+        setProgress(easeOut);
+        setSpriteOpacity(opacity);
       }
-      
+
       if (t >= 1) {
+        setProgress(1);
+        setSpriteOpacity(0);
         onComplete();
         return;
       }
-      
+
       rafId = requestAnimationFrame(animate);
     };
-    
+
     rafId = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(rafId);
   }, [startTime, onComplete]);
