@@ -108,6 +108,15 @@
         .goal-bounce {
             animation: goal-bounce 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
         }
+        /* FTUE 4: same up/down motion, 6px down, loop forever (no white flash) */
+        @keyframes goal-bounce-ftue4 {
+            0% { transform: translateY(0); }
+            30% { transform: translateY(6px); }
+            100% { transform: translateY(0); }
+        }
+        .goal-bounce-ftue4 {
+            animation: goal-bounce-ftue4 750ms ease-in-out infinite;
+        }
         /* Goal slot fade-in: 0→100% opacity over 500ms (no bounce) */
         @keyframes goal-slot-fade-in {
             0% { opacity: 0; }

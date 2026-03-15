@@ -22,6 +22,8 @@ interface SideActionProps {
   /** Seed storage: show "X/Y" badge (e.g. 0/1, 3/10); background width fits content. */
   storageCount?: number;
   storageMax?: number;
+  /** When true: progress stays 0%, badge shows "FREE", tap still works but doesn't consume charges/capacity. */
+  freeMode?: boolean;
   /** Incremented each time we should bounce (e.g. seed progress hits 100%); key forces animation to re-run. */
   bounceTrigger?: number;
   /** If true, disable the rotate animation when flashing (default: false) */
@@ -43,6 +45,7 @@ export const SideAction: React.FC<SideActionProps> = ({
   progressRef,
   storageCount,
   storageMax,
+  freeMode = false,
   bounceTrigger = 0,
   noRotateOnFlash = false,
   onClick 
@@ -62,9 +65,9 @@ export const SideAction: React.FC<SideActionProps> = ({
   const raf30LastTickRef = useRef(0);
   isFlashingRef.current = isFlashing;
 
-  // When progressRef is provided, drive both progress rings at 30fps (smooth enough, less work than 60fps)
+  // When progressRef is provided and not in free mode, drive both progress rings at 30fps (smooth enough, less work than 60fps)
   useEffect(() => {
-    if (!progressRef) return;
+    if (!progressRef || freeMode) return;
     let rafId: number;
     const tick = () => {
       if (!shouldTick30(raf30LastTickRef)) {
@@ -96,10 +99,10 @@ export const SideAction: React.FC<SideActionProps> = ({
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [progressRef, circumference, whiteCircumference]);
+  }, [progressRef, circumference, whiteCircumference, freeMode]);
 
-  // Clamp progress to 0–1 so the ring never shows negative or >100%
-  const clampedProgress = Math.max(0, Math.min(1, progress));
+  // Clamp progress to 0–1 so the ring never shows negative or >100%; in free mode always show 0
+  const clampedProgress = freeMode ? 0 : Math.max(0, Math.min(1, progress));
   const displayProgress = (isFlashing || clampedProgress >= 1) ? 0 : clampedProgress;
   const strokeDashoffset = circumference - (displayProgress * circumference);
   const whiteStrokeDashoffset = whiteCircumference - (displayProgress * whiteCircumference);
@@ -138,16 +141,16 @@ export const SideAction: React.FC<SideActionProps> = ({
   // White version progress bar colors: upgrade button green for completed, storage text dark green for incomplete
   const whiteProgressCompletedColor = '#9db546'; // light green for completed progress
   const whiteProgressIncompleteColor = '#475c3b'; // storage text dark green
-  const useRefDrive = progressRef != null;
+  const useRefDrive = progressRef != null && !freeMode;
   // Green bar: hides progress when flashing
   const greenPct = useRefDrive ? Math.max(0, Math.min(1, (progressRef?.current ?? 0) / 100)) : 0;
   const refDriveOffset = useRefDrive
     ? circumference - ((isFlashing ? 0 : greenPct) * circumference)
-    : undefined;
+    : (freeMode ? circumference : undefined);
   // White bar: always shows actual progress
   const whiteRefDriveOffset = useRefDrive
     ? whiteCircumference - (greenPct * whiteCircumference)
-    : undefined;
+    : (freeMode ? whiteCircumference : undefined);
 
   return (
     <div className="relative overflow-visible">
@@ -336,8 +339,27 @@ export const SideAction: React.FC<SideActionProps> = ({
           <div className="absolute inset-0 bg-gradient-to-tr from-white/10 to-transparent pointer-events-none"></div>
         </div>
 
-        {/* Storage badge: X/Y (fits content width) or FULL when board full and ready */}
-        {storageCount !== undefined && storageMax !== undefined ? (
+        {/* Storage badge: FREE (free mode), X/Y (fits content width), or FULL when board full and ready */}
+        {freeMode && (storageCount !== undefined || storageMax !== undefined) ? (
+          <div 
+            className="absolute bottom-[-6px] py-[3px] shadow-md border-2 z-20 flex items-center justify-center transition-all duration-200"
+            style={{ 
+              backgroundImage: 'linear-gradient(to bottom, #fcf0c6, #d0df6f)',
+              borderColor: '#7c8741',
+              borderRadius: '999px',
+              paddingLeft: '8px',
+              paddingRight: '8px',
+              minWidth: '2ch'
+            }}
+          >
+            <span 
+              className="text-[11.25px] font-black uppercase tracking-widest leading-none whitespace-nowrap"
+              style={{ color: '#475c3b' }}
+            >
+              FREE
+            </span>
+          </div>
+        ) : storageCount !== undefined && storageMax !== undefined ? (
           <div 
             className="absolute bottom-[-6px] py-[3px] shadow-md border-2 z-20 flex items-center justify-center transition-all duration-200"
             style={{ 

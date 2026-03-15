@@ -31,6 +31,7 @@ import { LoadingScreen } from './components/LoadingScreen';
 import { FtuePopup } from './components/FtuePopup';
 import { Ftue2Overlay } from './components/Ftue2Overlay';
 import { Ftue3Overlay } from './components/Ftue3Overlay';
+import { Ftue4Overlay } from './components/Ftue4Overlay';
 import { TabType, ScreenType, BoardCell, Item, DragState } from './types';
 import type { FtueStageId } from './ftue/ftueConfig';
 import { assetPath } from './utils/assetPath';
@@ -464,6 +465,10 @@ export default function App() {
   const [ftue2FadingOut, setFtue2FadingOut] = useState(false);
   /** FTUE_3: true when fading out finger + textbox after successful 4→13 merge */
   const [ftue3FadingOut, setFtue3FadingOut] = useState(false);
+  /** FTUE_4: true when fading out textbox after "Lets Harvest!" click */
+  const [ftue4FadingOut, setFtue4FadingOut] = useState(false);
+  /** FTUE_4: true after FTUE 3 completes; start FTUE 4 only when player clicks "Excellent!" on plant 2 discovery */
+  const [ftue4Pending, setFtue4Pending] = useState(false);
   /** FTUE_2: seed button rect for overlay hole + finger + text position */
   const [seedButtonRect, setSeedButtonRect] = useState<DOMRect | null>(null);
   /** FTUE: hide player level section until we reveal it (set to true when ready) */
@@ -472,8 +477,12 @@ export default function App() {
   const [ftueUpgradePanelVisible, setFtueUpgradePanelVisible] = useState(false);
   /** FTUE: hide seeds button during loading and welcome; reveal when FTUE_2 (seed_tap) shows. Hidden from first frame so no fade-in flash. */
   const ftueHideSeedsButton = isLoading || activeFtueStage === 'welcome';
-  /** FTUE: hide harvest button during loading and welcome/seed_tap/merge_drag (and future ftue4). Hidden from first frame so no fade-in flash. */
-  const ftueHideHarvestButton = isLoading || activeFtueStage === 'welcome' || activeFtueStage === 'seed_tap' || activeFtueStage === 'merge_drag';
+  /** FTUE: hide harvest button during loading and welcome/seed_tap/merge_drag/first_goal. Hidden from first frame so no fade-in flash. */
+  const ftueHideHarvestButton = isLoading || activeFtueStage === 'welcome' || activeFtueStage === 'seed_tap' || activeFtueStage === 'merge_drag' || activeFtueStage === 'first_goal';
+  /** FTUE: hide goals area during welcome/seed_tap/merge_drag (empty during FTUE 1–3) */
+  const ftueHideGoals = activeFtueStage === 'welcome' || activeFtueStage === 'seed_tap' || activeFtueStage === 'merge_drag';
+  /** FTUE 1–4: seeds button in "free" mode – 0% progress, badge "FREE", tap works but doesn't consume seeds */
+  const seedsFreeMode = activeFtueStage != null;
   const [pendingUnlockUpgradeId, setPendingUnlockUpgradeId] = useState<string | null>(null);
   const nextWalletBurstIdRef = useRef(0);
   const nextGoalCoinBurstIdRef = useRef(0);
@@ -947,6 +956,11 @@ export default function App() {
         rafId = requestAnimationFrame(tick);
         return;
       }
+      // FTUE 1–4: seeds in free mode – don't advance progress
+      if (activeFtueStage != null) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
       const n = getTickCount60(seedRaf60LastTickRef);
       if (n === 0) {
         rafId = requestAnimationFrame(tick);
@@ -966,7 +980,7 @@ export default function App() {
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [seedProductionLevel, isLoading, activeBoosts]);
+  }, [seedProductionLevel, isLoading, activeBoosts, activeFtueStage]);
 
   // Goal loading countdown: Order Speed (10s base - 1s per level, min 0). Rush Orders boost = 0s. Don't start until slot is 100% faded in.
   const goalIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1566,7 +1580,7 @@ export default function App() {
         }
         // All seeds spawn at seedLevel (from highest plant discovered)
         spawnProjectile(targetIdx, seedLevel);
-        setSeedsInStorage((prev) => Math.max(0, prev - 1));
+        if (!seedsFreeMode) setSeedsInStorage((prev) => Math.max(0, prev - 1));
         triggerSeedButtonLeafBurst();
         // FTUE_2: count this seed; after 2, start fade out
         if (activeFtueStage === 'seed_tap') {
@@ -1608,6 +1622,9 @@ export default function App() {
     }
 
     if (isSeedFlashing) return;
+
+    // FTUE 1–4 free mode: progress bar doesn't move, don't add progress on tap
+    if (seedsFreeMode) return;
 
     // Seed button: TAP_BAR_PERCENT when empty (no seeds to fire)
     const tapPercent = TAP_BAR_PERCENT;
@@ -2463,6 +2480,7 @@ export default function App() {
                   const goalDisplayIndex = visibleOrder.indexOf(slotIdx);
                   const state = goalSlots[slotIdx];
                   const isBouncing = goalBounceSlots.includes(slotIdx);
+                  const isFtue4Bounce = activeFtueStage === 'first_goal' && slotIdx === 0 && !ftue4FadingOut;
                   const isTransitioning = goalTransitionSlot === slotIdx;
                   const isLoadingState = state === 'loading';
                   const isGreenState = state === 'green';
@@ -2470,7 +2488,7 @@ export default function App() {
                   const isEmpty = state === 'empty';
                   const isFadingIn = slotIdx === goalSlotFadeInSlot;
                   const isSlidingUp = goalSlidingUpSlots.has(slotIdx);
-                  const showSlot = !isEmpty || isTransitioning || isCompletedState;
+                  const showSlot = !ftueHideGoals && (!isEmpty || isTransitioning || isCompletedState);
                   const loadingOpacity = isLoadingState ? (goalTransitionFade ? 0 : 1) : isTransitioning ? (goalTransitionFade ? 0 : 1) : 0;
                   const greenOpacity = isGreenState ? 1 : isTransitioning ? (goalTransitionFade ? 1 : 0) : 0;
                   const showGreenContent = isGreenState || (isTransitioning && goalTransitionFade);
@@ -2571,7 +2589,8 @@ export default function App() {
                   return (
                     <div
                       key={slotIdx}
-                      className={`absolute ${isFadingIn ? 'goal-no-transition' : 'goal-slide-over'} ${isBouncing ? 'goal-bounce' : ''} ${isFadingIn ? 'goal-slot-fade-in' : ''} ${isSlidingUp ? 'goal-slide-up' : ''} ${showCompletedContent ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'}`}
+                      id={slotIdx === 0 ? 'goal-slot-0' : undefined}
+                      className={`absolute ${isFadingIn ? 'goal-no-transition' : 'goal-slide-over'} ${isFtue4Bounce ? 'goal-bounce-ftue4' : isBouncing ? 'goal-bounce' : ''} ${isFadingIn ? 'goal-slot-fade-in' : ''} ${isSlidingUp ? 'goal-slide-up' : ''} ${showCompletedContent ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'}`}
                       style={{
                         width: '105px',
                         height: '210px',
@@ -2613,7 +2632,7 @@ export default function App() {
                   );
                 })}
                 {/* Coin goal: always 5th slot (index 4), yellow bg, 30s radial, tap → fake ad → explode to wallet */}
-                {coinGoalVisible && playerLevel >= 2 && (
+                {coinGoalVisible && playerLevel >= 2 && !ftueHideGoals && (
                   <div
                     className={`absolute goal-slide-over pointer-events-auto cursor-pointer ${coinGoalBounce ? 'goal-bounce' : ''}`}
                     style={{
@@ -2705,15 +2724,16 @@ export default function App() {
                         icon={assetPath(`/assets/plants/plant_${seedLevel}.png`)}
                         iconScale={1.35}
                         iconOffsetY={-1}
-                        progress={Math.max(0, Math.min(1, seedProgress / 100))}
-                        progressRef={seedProgressRef} 
+                        progress={seedsFreeMode ? 0 : Math.max(0, Math.min(1, seedProgress / 100))}
+                        progressRef={seedProgressRef}
                         color="#a7c957"
                         isActive={activeTab === 'SEEDS' && isExpanded}
-                        isFlashing={seedsInStorage > 0}
+                        isFlashing={seedsFreeMode ? true : seedsInStorage > 0}
                         shouldAnimate={!isGridFull}
                         isBoardFull={isGridFull}
                         storageCount={seedsInStorage}
                         storageMax={seedStorageMax}
+                        freeMode={seedsFreeMode}
                         bounceTrigger={seedBounceTrigger}
                         onClick={handlePlantClick}
                       />
@@ -3260,8 +3280,23 @@ export default function App() {
                 isActive={activeFtueStage === 'merge_drag'}
                 isFadingOut={ftue3FadingOut}
                 onFadeOutComplete={() => {
-                  setActiveFtueStage(null);
                   setFtue3FadingOut(false);
+                  setFtue4Pending(true);
+                }}
+              />
+            )}
+            {/* FTUE_4: textbox + "Lets Harvest!" next to goal slot 0; only button tappable; click stops bounce and fades out */}
+            {(activeFtueStage === 'first_goal' || ftue4FadingOut) && (
+              <Ftue4Overlay
+                isActive={activeFtueStage === 'first_goal'}
+                isFadingOut={ftue4FadingOut}
+                onLetsHarvest={() => {
+                  setGoalBounceSlots((prev) => prev.filter((s) => s !== 0));
+                  setFtue4FadingOut(true);
+                }}
+                onFadeOutComplete={() => {
+                  setActiveFtueStage(null);
+                  setFtue4FadingOut(false);
                 }}
               />
             )}
@@ -3329,17 +3364,29 @@ export default function App() {
                 showCloseButton={false}
                 closeOnBackdropClick={false}
                 appScale={appScale}
-                onButtonClick={discoveryPopup.level === 2 ? undefined : (buttonRect) => {
-                  const container = containerRef.current;
-                  if (!container) return;
-                  const scale = appScaleRef.current;
-                  const containerRect = container.getBoundingClientRect();
-                  setBarnParticles(prev => [...prev, {
-                    id: `barn-${Date.now()}`,
-                    startX: (buttonRect.left + buttonRect.width / 2 - containerRect.left) / scale,
-                    startY: (buttonRect.top + buttonRect.height / 2 - containerRect.top) / scale,
-                  }]);
-                }}
+                onButtonClick={discoveryPopup.level === 2
+                  ? () => {
+                      if (ftue4Pending) {
+                        setFtue4Pending(false);
+                        setActiveFtueStage('first_goal');
+                        setGoalSlots(['green', 'empty', 'empty', 'empty', 'empty']);
+                        setGoalPlantTypes([2, 0, 0, 0, 0]);
+                        setGoalCounts([5, 0, 0, 0, 0]);
+                        setGoalAmountsRequired([5, 0, 0, 0, 0]);
+                        setGoalDisplayOrder([0]);
+                      }
+                    }
+                  : (buttonRect) => {
+                      const container = containerRef.current;
+                      if (!container) return;
+                      const scale = appScaleRef.current;
+                      const containerRect = container.getBoundingClientRect();
+                      setBarnParticles(prev => [...prev, {
+                        id: `barn-${Date.now()}`,
+                        startX: (buttonRect.left + buttonRect.width / 2 - containerRect.left) / scale,
+                        startY: (buttonRect.top + buttonRect.height / 2 - containerRect.top) / scale,
+                      }]);
+                    }}
               />
             )}
 
