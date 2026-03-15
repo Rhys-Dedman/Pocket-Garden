@@ -3,7 +3,7 @@
  * Each stage has: name, description (shown/hidden to player), behaviour, trigger.
  */
 
-export type FtueStageId = 'welcome' | 'seed_tap' | 'merge_drag' | 'first_goal' | 'first_harvest' | 'first_goal_collect';
+export type FtueStageId = 'welcome' | 'seed_tap' | 'merge_drag' | 'first_goal' | 'first_harvest' | 'first_goal_collect' | 'first_more_orders';
 
 export type FtueDescriptionVisibility = 'shown' | 'hidden';
 
@@ -64,6 +64,14 @@ export const FTUE_6: FtueStageDef = {
   trigger: 'when_goal_slot_0_becomes_coin',
 };
 
+/** FTUE_7: More orders – 2 new goals spawn; textbox + finger at seeds; tap seeds 2x then fade out. */
+export const FTUE_7: FtueStageDef = {
+  id: 'first_more_orders',
+  name: 'First More Orders',
+  descriptionVisibility: 'shown',
+  trigger: 'after_ftue6_collect',
+};
+
 export const FTUE_STAGES: Record<FtueStageId, FtueStageDef> = {
   welcome: FTUE_1,
   seed_tap: FTUE_2,
@@ -71,4 +79,5 @@ export const FTUE_STAGES: Record<FtueStageId, FtueStageDef> = {
   first_goal: FTUE_4,
   first_harvest: FTUE_5,
   first_goal_collect: FTUE_6,
+  first_more_orders: FTUE_7,
 };

@@ -34,6 +34,7 @@ import { Ftue3Overlay } from './components/Ftue3Overlay';
 import { Ftue4Overlay } from './components/Ftue4Overlay';
 import { Ftue5Overlay } from './components/Ftue5Overlay';
 import { Ftue6Overlay } from './components/Ftue6Overlay';
+import { Ftue7Overlay } from './components/Ftue7Overlay';
 import { TabType, ScreenType, BoardCell, Item, DragState } from './types';
 import type { FtueStageId } from './ftue/ftueConfig';
 import { assetPath } from './utils/assetPath';
@@ -474,8 +475,18 @@ export default function App() {
   /** FTUE_2: seed button rect for overlay hole + finger + text position */
   const [seedButtonRect, setSeedButtonRect] = useState<DOMRect | null>(null);
   const [harvestButtonRect, setHarvestButtonRect] = useState<DOMRect | null>(null);
-  /** FTUE: hide player level section until we reveal it (set to true when ready) */
+  /** FTUE: hide player level section until we reveal it (set to true when FTUE 6 shows) */
   const [ftuePlayerLevelVisible, setFtuePlayerLevelVisible] = useState(false);
+  /** FTUE 7: after collecting in FTUE 6, schedule spawn of 2 goals then show "more orders" overlay */
+  const [ftue7Scheduled, setFtue7Scheduled] = useState(false);
+  const ftue7SkipLoadingSlot0Ref = useRef(false); // skip standard "start loading" for slot 0 when FTUE 7 will spawn goals
+  /** Slots 0/1 in position but hidden until we reveal (fade-in); use goal-no-transition for both during this phase */
+  const [ftue7UnrevealedSlots, setFtue7UnrevealedSlots] = useState<number[]>([]);
+  const [ftue7RevealMode, setFtue7RevealMode] = useState(false); // true from first reveal until we clear fade-in slot
+  /** Slots playing spawn bounce (panel + icon bounce, no white flash); cleared after 500ms */
+  const [goalSpawnBounceSlots, setGoalSpawnBounceSlots] = useState<number[]>([]);
+  const [ftue7SeedFireCount, setFtue7SeedFireCount] = useState(0);
+  const [ftue7FadingOut, setFtue7FadingOut] = useState(false);
   /** FTUE: hide upgrade panel until we reveal it (set to true when ready) */
   const [ftueUpgradePanelVisible, setFtueUpgradePanelVisible] = useState(false);
   /** FTUE: hide seeds button during loading and welcome; reveal when FTUE_2 (seed_tap) shows. Hidden from first frame so no fade-in flash. */
@@ -533,7 +544,7 @@ export default function App() {
     if (plantButtonRef.current) setSeedButtonRect(plantButtonRef.current.getBoundingClientRect());
   }, []);
   useEffect(() => {
-    if (activeFtueStage !== 'seed_tap' && !ftue2FadingOut) return;
+    if (activeFtueStage !== 'seed_tap' && !ftue2FadingOut && activeFtueStage !== 'first_more_orders' && !ftue7FadingOut) return;
     updateSeedButtonRect();
     window.addEventListener('resize', updateSeedButtonRect);
     const raf = requestAnimationFrame(updateSeedButtonRect);
@@ -541,7 +552,50 @@ export default function App() {
       window.removeEventListener('resize', updateSeedButtonRect);
       cancelAnimationFrame(raf);
     };
-  }, [activeFtueStage, ftue2FadingOut, updateSeedButtonRect]);
+  }, [activeFtueStage, ftue2FadingOut, ftue7FadingOut, updateSeedButtonRect]);
+
+  // FTUE 6: fade in player level section when collect-coins step shows
+  useEffect(() => {
+    if (activeFtueStage === 'first_goal_collect') setFtuePlayerLevelVisible(true);
+  }, [activeFtueStage]);
+
+  // FTUE 7: 1s after FTUE 6 collect, put both goals in position then reveal (500ms apart), then 1s later show textbox/finger
+  useEffect(() => {
+    if (!ftue7Scheduled) return;
+    const t1 = setTimeout(() => {
+      ftue7SkipLoadingSlot0Ref.current = false;
+      setGoalSlots((s) => { const n = [...s]; n[0] = 'green'; n[1] = 'green'; return n; });
+      setGoalPlantTypes((p) => { const n = [...p]; n[0] = 1; n[1] = 2; return n; });
+      setGoalCounts((c) => { const n = [...c]; n[0] = 5; n[1] = 3; return n; });
+      setGoalAmountsRequired((a) => { const n = [...a]; n[0] = 5; n[1] = 3; return n; });
+      setGoalDisplayOrder([0, 1]);
+      setFtue7UnrevealedSlots([0, 1]);
+      setFtue7RevealMode(true);
+      setGoalSlotFadeInSlot(0);
+      setGoalBounceSlots((prev) => (prev.includes(0) ? prev : [...prev, 0]));
+      setGoalSpawnBounceSlots((prev) => (prev.includes(0) ? prev : [...prev, 0]));
+    }, 1000);
+    const t2 = setTimeout(() => {
+      setGoalBounceSlots((prev) => prev.filter((s) => s !== 0));
+      setGoalSpawnBounceSlots((prev) => prev.filter((s) => s !== 0));
+      setGoalSlotFadeInSlot(1);
+      setFtue7UnrevealedSlots((prev) => prev.filter((s) => s !== 0));
+      setGoalBounceSlots((prev) => (prev.includes(1) ? prev : [...prev, 1]));
+      setGoalSpawnBounceSlots((prev) => (prev.includes(1) ? prev : [...prev, 1]));
+    }, 1500);
+    const t3 = setTimeout(() => {
+      setGoalBounceSlots((prev) => prev.filter((s) => s !== 1));
+      setGoalSpawnBounceSlots((prev) => prev.filter((s) => s !== 1));
+      setGoalSlotFadeInSlot(null);
+      setFtue7UnrevealedSlots([]);
+      setFtue7RevealMode(false);
+    }, 2000);
+    const t4 = setTimeout(() => {
+      setActiveFtueStage('first_more_orders');
+      setFtue7Scheduled(false);
+    }, 2500);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); };
+  }, [ftue7Scheduled]);
 
   // FTUE_5: keep harvest button rect for overlay hole + finger + text
   const updateHarvestButtonRect = useCallback(() => {
@@ -1595,9 +1649,11 @@ export default function App() {
 
     // FTUE_2: must tap exactly 2 times to plant 2 seeds; block 3rd tap
     if (activeFtueStage === 'seed_tap' && ftue2SeedFireCount >= 2) return;
+    // FTUE_7: must tap exactly 2 times; block 3rd tap
+    if (activeFtueStage === 'first_more_orders' && ftue7SeedFireCount >= 2) return;
 
-    // When white (seeds in storage): only fire seed, no progress
-    if (seedsInStorage > 0) {
+    // When white (seeds in storage) or FTUE 7 (free 2 seeds): only fire seed, no progress
+    if (seedsInStorage > 0 || activeFtueStage === 'first_more_orders') {
       // Get cells that have projectiles in flight (reserved)
       const reservedCells = new Set(activeProjectiles.map(p => p.targetIdx));
       
@@ -1612,6 +1668,8 @@ export default function App() {
           if (emptyIndices.includes(FTUE_2_SEED_CELL_A)) targetIdx = FTUE_2_SEED_CELL_A;
           else if (emptyIndices.includes(FTUE_2_SEED_CELL_B)) targetIdx = FTUE_2_SEED_CELL_B;
           else targetIdx = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
+        } else if (activeFtueStage === 'first_more_orders') {
+          targetIdx = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
         } else {
           targetIdx = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
         }
@@ -1630,9 +1688,17 @@ export default function App() {
             return next;
           });
         }
-        
-        // Bonus Seed: chance to fire a second seed (skip during FTUE_2 so we only fire exactly 2 seeds from 2 taps)
-        const bonusChance = activeFtueStage === 'seed_tap' ? 0 : getBonusSeedChance(seedsState);
+        // FTUE_7: count this seed; after 2, start fade out
+        if (activeFtueStage === 'first_more_orders') {
+          setFtue7SeedFireCount((c) => {
+            const next = c + 1;
+            if (next >= 2) setFtue7FadingOut(true);
+            return next;
+          });
+        }
+
+        // Bonus Seed: chance to fire a second seed (skip during FTUE_2 and FTUE_7 so we only fire exactly 2 seeds from 2 taps)
+        const bonusChance = (activeFtueStage === 'seed_tap' || activeFtueStage === 'first_more_orders') ? 0 : getBonusSeedChance(seedsState);
         if (bonusChance > 0 && Math.random() * 100 < bonusChance) {
           // Get remaining empty unlocked cells (excluding the first target)
           const remainingEmptyIndices = emptyIndices.filter(idx => idx !== targetIdx);
@@ -2239,6 +2305,8 @@ export default function App() {
       lastMergeDiscoveryLevelRef.current = newLevel; // same "cycle": only allow discovery when current highest === this (never use pre-merge count)
       // Show discovery popup immediately when merge starts (feels more responsive)
       setDiscoveryPopup({ isVisible: true, level: newLevel });
+      // FTUE 3: discovery popup hides FTUE 3 overlay so onFadeOutComplete never runs; set ftue4Pending so "Excellent!" starts FTUE 4
+      if (newLevel === 2 && activeFtueStage === 'merge_drag') setFtue4Pending(true);
     }
     
     // Chain Harvest: per-cell chance to instantly harvest adjacent crops (without removing them)
@@ -2551,6 +2619,8 @@ export default function App() {
                   const isCompletedState = state === 'completed';
                   const isEmpty = state === 'empty';
                   const isFadingIn = slotIdx === goalSlotFadeInSlot;
+                  const isFtue7RevealNoSlide = ftue7RevealMode && (slotIdx === 0 || slotIdx === 1);
+                  const isFtue7Hidden = ftue7UnrevealedSlots.includes(slotIdx) && slotIdx !== goalSlotFadeInSlot;
                   const isSlidingUp = goalSlidingUpSlots.has(slotIdx);
                   const showSlot = !ftueHideGoals && (!isEmpty || isTransitioning || isCompletedState);
                   const loadingOpacity = isLoadingState ? (goalTransitionFade ? 0 : 1) : isTransitioning ? (goalTransitionFade ? 0 : 1) : 0;
@@ -2560,7 +2630,12 @@ export default function App() {
                   const showLoadingText = isLoadingState && !goalTransitionFade;
                   const handleCompletedTap = () => {
                     if (!isCompletedState || isSlidingUp) return;
-                    if (slotIdx === 0 && activeFtueStage === 'first_goal_collect') setActiveFtueStage(null);
+                    if (slotIdx === 0 && activeFtueStage === 'first_goal_collect') {
+                      setActiveFtueStage(null);
+                      ftue7SkipLoadingSlot0Ref.current = true;
+                      setFtue7Scheduled(true);
+                      setActivePlantPanels((prev) => prev.filter((p) => p.goalSlotIdx !== 0 && p.goalSlotIdx !== 1));
+                    }
                     setGoalSlidingUpSlots((prev) => new Set(prev).add(slotIdx));
                     const iconEl = goalIconRefs[slotIdx]?.current;
                     const container = containerRef.current;
@@ -2635,6 +2710,7 @@ export default function App() {
                           if (hasLoading) return s;
                           const n = [...s];
                           if (n[slotIdx] === 'empty' && slotIdx < maxSlots) {
+                            if (slotIdx === 0 && ftue7SkipLoadingSlot0Ref.current) return s; // FTUE 7 spawns slot 0 & 1 at 1s/1.2s
                             n[slotIdx] = 'loading';
                             setGoalDisplayOrder((prev) => (prev.includes(slotIdx) ? prev : [...prev, slotIdx]));
                             setGoalSlotFadeInSlot(slotIdx);
@@ -2655,14 +2731,14 @@ export default function App() {
                     <div
                       key={slotIdx}
                       id={slotIdx === 0 ? 'goal-slot-0' : undefined}
-                      className={`absolute ${isFadingIn ? 'goal-no-transition' : 'goal-slide-over'} ${isFtue4Bounce ? 'goal-bounce-ftue4' : isBouncing ? 'goal-bounce' : ''} ${isFadingIn ? 'goal-slot-fade-in' : ''} ${isSlidingUp ? 'goal-slide-up' : ''} ${showCompletedContent ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'}`}
+                      className={`absolute ${(isFadingIn || isFtue7RevealNoSlide) ? 'goal-no-transition' : 'goal-slide-over'} ${isFtue4Bounce ? 'goal-bounce-ftue4' : (isBouncing || goalSpawnBounceSlots.includes(slotIdx)) && !isFadingIn ? 'goal-bounce' : ''} ${isFadingIn && (isBouncing || goalSpawnBounceSlots.includes(slotIdx)) ? 'goal-slot-fade-in-with-bounce' : isFadingIn ? 'goal-slot-fade-in' : ''} ${isSlidingUp ? 'goal-slide-up' : ''} ${showCompletedContent ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'}`}
                       style={{
                         width: '105px',
                         height: '210px',
                         marginRight: '-30px',
                         marginTop: '-25px',
                         left: goalDisplayIndex >= 0 ? goalDisplayIndex * SLOT_STEP_PX : -9999,
-                        opacity: isFadingIn ? undefined : (showSlot ? 1 : 0),
+                        opacity: isFtue7Hidden ? 0 : (isFadingIn ? undefined : (showSlot ? 1 : 0)),
                         visibility: goalDisplayIndex >= 0 ? 'visible' : 'hidden',
                         transitionDelay: slideDelayMs ? `${slideDelayMs}ms` : undefined,
                       }}
@@ -2678,7 +2754,7 @@ export default function App() {
                           <img src={assetPath('/assets/goals/goal_cream.png')} alt="" className="absolute inset-0 w-full h-full object-contain object-top" style={{ zIndex: 5, opacity: isCompletedState ? 1 : 0 }} />
                           {showGreenContent && !showCompletedContent && (
                             <>
-                              <img ref={goalIconRefs[slotIdx]} src={getGoalIconForPlantLevel(goalPlantTypes[slotIdx] ?? slotIdx + 1)} alt="" className={`absolute left-1/2 object-contain pointer-events-none transition-opacity duration-100 ${goalImpactSlots.includes(slotIdx) ? 'goal-icon-bounce' : ''}`} style={{ zIndex: 6, bottom: '71%', width: 40, height: 40, opacity: greenOpacity, transform: 'translate(-50%, -2px)' }} />
+                              <img ref={goalIconRefs[slotIdx]} src={getGoalIconForPlantLevel(goalPlantTypes[slotIdx] ?? slotIdx + 1)} alt="" className={`absolute left-1/2 object-contain pointer-events-none transition-opacity duration-100 ${(goalImpactSlots.includes(slotIdx) || goalSpawnBounceSlots.includes(slotIdx)) ? 'goal-icon-bounce' : ''}`} style={{ zIndex: 6, bottom: '71%', width: 40, height: 40, opacity: greenOpacity, transform: 'translate(-50%, -2px)' }} />
                               <span className="absolute left-1/2 font-bold pointer-events-none transition-opacity duration-100" style={{ zIndex: 6, bottom: '62%', color: goalImpactSlots.includes(slotIdx) ? '#537b38' : '#a1b54e', fontSize: '15px', opacity: greenOpacity, transform: 'translate(-50%, -1px)' }}>{goalCounts[slotIdx]}</span>
                             </>
                           )}
@@ -2793,7 +2869,7 @@ export default function App() {
                         progressRef={seedProgressRef}
                         color="#a7c957"
                         isActive={activeTab === 'SEEDS' && isExpanded}
-                        isFlashing={seedsFreeMode ? (ftue2SeedFireCount >= 2 ? false : true) : seedsInStorage > 0}
+                        isFlashing={seedsFreeMode ? (activeFtueStage === 'first_more_orders' ? (ftue7SeedFireCount >= 2 ? false : true) : (ftue2SeedFireCount >= 2 ? false : true)) : seedsInStorage > 0}
                         shouldAnimate={!isGridFull}
                         isBoardFull={isGridFull}
                         storageCount={seedsInStorage}
@@ -3341,8 +3417,8 @@ export default function App() {
                 }}
               />
             )}
-            {/* FTUE_3: finger slides 4→13, textbox "Merge these two plants together"; only valid move is drag 4→13; fades out on merge */}
-            {(activeFtueStage === 'merge_drag' || ftue3FadingOut) && (
+            {/* FTUE_3: finger slides 4→13, textbox "Merge these two plants together"; only valid move is drag 4→13; fades out on merge; hide when New Discovery (plant 2) popup is up */}
+            {(activeFtueStage === 'merge_drag' || ftue3FadingOut) && !discoveryPopup && (
               <Ftue3Overlay
                 isActive={activeFtueStage === 'merge_drag'}
                 isFadingOut={ftue3FadingOut}
@@ -3379,6 +3455,19 @@ export default function App() {
             {/* FTUE_6: goal in coin state – textbox + finger on goal slot 0; only goal tappable; tap to collect and end */}
             {activeFtueStage === 'first_goal_collect' && (
               <Ftue6Overlay isActive={activeFtueStage === 'first_goal_collect'} />
+            )}
+            {/* FTUE_7: more orders – textbox + finger at seeds; only seeds tappable; 2 taps then fade out */}
+            {(activeFtueStage === 'first_more_orders' || ftue7FadingOut) && (
+              <Ftue7Overlay
+                buttonRect={seedButtonRect}
+                isActive={activeFtueStage === 'first_more_orders'}
+                isFadingOut={ftue7FadingOut}
+                onFadeOutComplete={() => {
+                  setActiveFtueStage(null);
+                  setFtue7FadingOut(false);
+                  setFtue7SeedFireCount(0);
+                }}
+              />
             )}
             {/* Level Up Popup */}
             {levelUpPopup && (() => {

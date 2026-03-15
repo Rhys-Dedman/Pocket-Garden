@@ -265,7 +265,9 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
                 backgroundColor: '#775041',
                 borderWidth: 1,
                 borderColor: '#e9dcaf',
-                ...(hidePlayerLevel && { visibility: 'hidden' as const, pointerEvents: 'none' as const }),
+                opacity: hidePlayerLevel ? 0 : 1,
+                transition: 'opacity 400ms ease-out',
+                ...(hidePlayerLevel && { pointerEvents: 'none' as const }),
               }}
             >
               <span className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center justify-center leading-none -ml-3 pointer-events-none z-10 w-[30px] h-[30px]">

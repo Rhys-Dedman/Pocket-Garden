@@ -30,8 +30,8 @@ export const Ftue6Overlay: React.FC<Ftue6OverlayProps> = ({ isActive }) => {
     setGoalRect(r);
     setTextboxStyle({
       position: 'fixed',
-      left: r.right + 16,
-      top: r.top + r.height / 2 - 120,
+      left: r.right + 34,
+      top: r.top + r.height / 2 - 130,
       opacity: 1,
       zIndex: 100,
     });

@@ -125,6 +125,10 @@
         .goal-slot-fade-in {
             animation: goal-slot-fade-in 500ms ease-out forwards;
         }
+        /* Fade-in + panel bounce together (e.g. FTUE 7 spawn) – both run on same element */
+        .goal-slot-fade-in-with-bounce {
+            animation: goal-slot-fade-in 500ms ease-out forwards, goal-bounce 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
         /* Goal impact: light green flash 0% > 100% > 0% */
         @keyframes goal-impact-lightgreen {
             0% { opacity: 0; }
