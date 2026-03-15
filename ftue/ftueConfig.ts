@@ -3,7 +3,7 @@
  * Each stage has: name, description (shown/hidden to player), behaviour, trigger.
  */
 
-export type FtueStageId = 'welcome' | 'seed_tap' | 'merge_drag' | 'first_goal' | 'first_harvest';
+export type FtueStageId = 'welcome' | 'seed_tap' | 'merge_drag' | 'first_goal' | 'first_harvest' | 'first_goal_collect';
 
 export type FtueDescriptionVisibility = 'shown' | 'hidden';
 
@@ -56,10 +56,19 @@ export const FTUE_5: FtueStageDef = {
   trigger: 'after_ftue4_close',
 };
 
+/** FTUE_6: Collect coins – textbox "Great job! Collect your coins", finger on goal slot 0; tap goal to collect and end. */
+export const FTUE_6: FtueStageDef = {
+  id: 'first_goal_collect',
+  name: 'First Goal Collect',
+  descriptionVisibility: 'shown',
+  trigger: 'when_goal_slot_0_becomes_coin',
+};
+
 export const FTUE_STAGES: Record<FtueStageId, FtueStageDef> = {
   welcome: FTUE_1,
   seed_tap: FTUE_2,
   merge_drag: FTUE_3,
   first_goal: FTUE_4,
   first_harvest: FTUE_5,
+  first_goal_collect: FTUE_6,
 };

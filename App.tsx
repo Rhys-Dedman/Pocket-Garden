@@ -33,6 +33,7 @@ import { Ftue2Overlay } from './components/Ftue2Overlay';
 import { Ftue3Overlay } from './components/Ftue3Overlay';
 import { Ftue4Overlay } from './components/Ftue4Overlay';
 import { Ftue5Overlay } from './components/Ftue5Overlay';
+import { Ftue6Overlay } from './components/Ftue6Overlay';
 import { TabType, ScreenType, BoardCell, Item, DragState } from './types';
 import type { FtueStageId } from './ftue/ftueConfig';
 import { assetPath } from './utils/assetPath';
@@ -2559,6 +2560,7 @@ export default function App() {
                   const showLoadingText = isLoadingState && !goalTransitionFade;
                   const handleCompletedTap = () => {
                     if (!isCompletedState || isSlidingUp) return;
+                    if (slotIdx === 0 && activeFtueStage === 'first_goal_collect') setActiveFtueStage(null);
                     setGoalSlidingUpSlots((prev) => new Set(prev).add(slotIdx));
                     const iconEl = goalIconRefs[slotIdx]?.current;
                     const container = containerRef.current;
@@ -3360,6 +3362,8 @@ export default function App() {
                   setFtue4FadingOut(true);
                 }}
                 onFadeOutComplete={() => {
+                  harvestProgressRef.current = 0;
+                  setHarvestProgress(0);
                   setActiveFtueStage('first_harvest');
                   setFtue4FadingOut(false);
                 }}
@@ -3371,6 +3375,10 @@ export default function App() {
                 buttonRect={harvestButtonRect}
                 isActive={activeFtueStage === 'first_harvest'}
               />
+            )}
+            {/* FTUE_6: goal in coin state – textbox + finger on goal slot 0; only goal tappable; tap to collect and end */}
+            {activeFtueStage === 'first_goal_collect' && (
+              <Ftue6Overlay isActive={activeFtueStage === 'first_goal_collect'} />
             )}
             {/* Level Up Popup */}
             {levelUpPopup && (() => {
@@ -3823,7 +3831,7 @@ export default function App() {
                       sNext[goalSlotIdx] = 'completed';
                       return sNext;
                     });
-                    if (goalSlotIdx === 0) setActiveFtueStage((stage) => (stage === 'first_harvest' ? null : stage));
+                    if (goalSlotIdx === 0) setActiveFtueStage((stage) => (stage === 'first_harvest' ? 'first_goal_collect' : stage));
                   }
                   return next;
                 });

@@ -37,7 +37,7 @@ export const Ftue4Overlay: React.FC<Ftue4OverlayProps> = ({
     const r = el.getBoundingClientRect();
     setTextboxStyle({
       position: 'fixed',
-      left: r.right + 16,
+      left: r.right + 0,
       top: r.top + r.height / 2 - 120,
       opacity: 1,
       zIndex: 100,
@@ -92,7 +92,7 @@ export const Ftue4Overlay: React.FC<Ftue4OverlayProps> = ({
         style={{
           ...FTUE_TEXTBOX,
           ...textboxStyle,
-          width: '380px',
+          width: '440px',
           transition: `opacity ${FADE_OUT_MS}ms ease-out`,
           opacity: isFadingOut ? 0 : textboxStyle.opacity ?? 1,
         }}
@@ -105,7 +105,7 @@ export const Ftue4Overlay: React.FC<Ftue4OverlayProps> = ({
             style={{ width: '100%' }}
           />
         </div>
-        <p className="text-center m-0 font-medium italic leading-snug mb-4" style={FTUE_TEXTBOX_TEXT}>
+        <p className="text-center m-0 font-medium italic leading-snug mb-4" style={{ ...FTUE_TEXTBOX_TEXT, paddingLeft: '24px', paddingRight: '24px' }}>
           Looks like we've got an order! Time to start harvesting.
         </p>
         <button
