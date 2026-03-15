@@ -35,6 +35,7 @@ import { Ftue4Overlay } from './components/Ftue4Overlay';
 import { Ftue5Overlay } from './components/Ftue5Overlay';
 import { Ftue6Overlay } from './components/Ftue6Overlay';
 import { Ftue7Overlay } from './components/Ftue7Overlay';
+import { Ftue8Overlay } from './components/Ftue8Overlay';
 import { TabType, ScreenType, BoardCell, Item, DragState } from './types';
 import type { FtueStageId } from './ftue/ftueConfig';
 import { assetPath } from './utils/assetPath';
@@ -466,6 +467,8 @@ export default function App() {
   const [ftue2SeedFireCount, setFtue2SeedFireCount] = useState(0);
   /** FTUE_2: true when fading out finger + text after 2 seeds */
   const [ftue2FadingOut, setFtue2FadingOut] = useState(false);
+  /** FTUE_2: block further seed taps after 2 (ref so rapid 3rd tap can't slip through before state updates) */
+  const ftue2SeedsBlockedRef = useRef(false);
   /** FTUE_3: true when fading out finger + textbox after successful 4→13 merge */
   const [ftue3FadingOut, setFtue3FadingOut] = useState(false);
   /** FTUE_4: true when fading out textbox after "Lets Harvest!" click */
@@ -487,18 +490,21 @@ export default function App() {
   const [goalSpawnBounceSlots, setGoalSpawnBounceSlots] = useState<number[]>([]);
   const [ftue7SeedFireCount, setFtue7SeedFireCount] = useState(0);
   const [ftue7FadingOut, setFtue7FadingOut] = useState(false);
+  /** FTUE 8: count down when FTUE 7's 2 seeds land; when 0, start first_harvest_multi */
+  const ftue8PendingLandCountRef = useRef(0);
+  const [ftue8FadingOut, setFtue8FadingOut] = useState(false);
   /** FTUE: hide upgrade panel until we reveal it (set to true when ready) */
   const [ftueUpgradePanelVisible, setFtueUpgradePanelVisible] = useState(false);
   /** FTUE: hide seeds button during loading and welcome; reveal when FTUE_2 (seed_tap) shows. Hidden from first frame so no fade-in flash. */
   const ftueHideSeedsButton = isLoading || activeFtueStage === 'welcome';
-  /** FTUE: hide harvest button during loading and welcome/seed_tap/merge_drag/first_goal (visible during first_harvest for FTUE 5). */
+  /** FTUE: hide harvest button during loading and welcome/seed_tap/merge_drag/first_goal (visible during first_harvest and first_harvest_multi for FTUE 5 & 8). */
   const ftueHideHarvestButton = isLoading || activeFtueStage === 'welcome' || activeFtueStage === 'seed_tap' || activeFtueStage === 'merge_drag' || activeFtueStage === 'first_goal';
   /** FTUE: hide goals area during welcome/seed_tap/merge_drag (empty during FTUE 1–3) */
   const ftueHideGoals = activeFtueStage === 'welcome' || activeFtueStage === 'seed_tap' || activeFtueStage === 'merge_drag';
-  /** FTUE 1–4: seeds button in "free" mode – 0% progress, badge "FREE", tap works but doesn't consume seeds */
-  const seedsFreeMode = activeFtueStage != null;
-  /** FTUE 5: harvest button in "free" mode – 0% progress, badge "FREE", tap works but doesn't consume charges */
-  const harvestFreeMode = activeFtueStage === 'first_harvest';
+  /** FTUE 1–4 (+ gap before FTUE 7): seeds button in "free" mode – 0% progress, badge "FREE"; green during ftue7Scheduled, white when FTUE 7 finger is showing */
+  const seedsFreeMode = activeFtueStage != null || ftue7Scheduled;
+  /** FTUE 5–8 (+ gap before FTUE 7): harvest button in "free" mode – 0% progress, badge "FREE"; green after FTUE 5 until FTUE 8 (then white until both goals done) */
+  const harvestFreeMode = activeFtueStage === 'first_harvest' || activeFtueStage === 'first_goal_collect' || activeFtueStage === 'first_more_orders' || activeFtueStage === 'first_harvest_multi' || ftue7Scheduled;
   const [pendingUnlockUpgradeId, setPendingUnlockUpgradeId] = useState<string | null>(null);
   const nextWalletBurstIdRef = useRef(0);
   const nextGoalCoinBurstIdRef = useRef(0);
@@ -559,7 +565,7 @@ export default function App() {
     if (activeFtueStage === 'first_goal_collect') setFtuePlayerLevelVisible(true);
   }, [activeFtueStage]);
 
-  // FTUE 7: 1s after FTUE 6 collect, put both goals in position then reveal (500ms apart), then 1s later show textbox/finger
+  // FTUE 7: 700ms after FTUE 6 collect, put both goals in position then reveal (500ms apart), then 0.5s later show textbox/finger
   useEffect(() => {
     if (!ftue7Scheduled) return;
     const t1 = setTimeout(() => {
@@ -574,7 +580,7 @@ export default function App() {
       setGoalSlotFadeInSlot(0);
       setGoalBounceSlots((prev) => (prev.includes(0) ? prev : [...prev, 0]));
       setGoalSpawnBounceSlots((prev) => (prev.includes(0) ? prev : [...prev, 0]));
-    }, 1000);
+    }, 700);
     const t2 = setTimeout(() => {
       setGoalBounceSlots((prev) => prev.filter((s) => s !== 0));
       setGoalSpawnBounceSlots((prev) => prev.filter((s) => s !== 0));
@@ -582,18 +588,18 @@ export default function App() {
       setFtue7UnrevealedSlots((prev) => prev.filter((s) => s !== 0));
       setGoalBounceSlots((prev) => (prev.includes(1) ? prev : [...prev, 1]));
       setGoalSpawnBounceSlots((prev) => (prev.includes(1) ? prev : [...prev, 1]));
-    }, 1500);
+    }, 1200);
     const t3 = setTimeout(() => {
       setGoalBounceSlots((prev) => prev.filter((s) => s !== 1));
       setGoalSpawnBounceSlots((prev) => prev.filter((s) => s !== 1));
       setGoalSlotFadeInSlot(null);
       setFtue7UnrevealedSlots([]);
       setFtue7RevealMode(false);
-    }, 2000);
+    }, 1700);
     const t4 = setTimeout(() => {
       setActiveFtueStage('first_more_orders');
       setFtue7Scheduled(false);
-    }, 2500);
+    }, 1700); // 0.5s after goal 2 (goal 2 at 1.2s, textbox at 1.7s)
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); };
   }, [ftue7Scheduled]);
 
@@ -602,7 +608,7 @@ export default function App() {
     if (harvestButtonRef.current) setHarvestButtonRect(harvestButtonRef.current.getBoundingClientRect());
   }, []);
   useEffect(() => {
-    if (activeFtueStage !== 'first_harvest') return;
+    if (activeFtueStage !== 'first_harvest' && activeFtueStage !== 'first_harvest_multi') return;
     updateHarvestButtonRect();
     window.addEventListener('resize', updateHarvestButtonRect);
     const raf = requestAnimationFrame(updateHarvestButtonRect);
@@ -612,17 +618,23 @@ export default function App() {
     };
   }, [activeFtueStage, updateHarvestButtonRect]);
 
-  // FTUE: keep seeds and harvest progress bars at 0% (reset refs + state when in FTUE)
+  // FTUE: keep seeds and harvest progress bars at 0% (reset refs + state when in FTUE or waiting for FTUE 7)
   useEffect(() => {
-    if (activeFtueStage != null) {
+    if (activeFtueStage != null || ftue7Scheduled) {
       seedProgressRef.current = 0;
       setSeedProgress(0);
     }
-    if (activeFtueStage === 'first_harvest') {
+    if (activeFtueStage === 'first_harvest' || activeFtueStage === 'first_goal_collect' || activeFtueStage === 'first_more_orders' || activeFtueStage === 'first_harvest_multi' || ftue7Scheduled) {
       harvestProgressRef.current = 0;
       setHarvestProgress(0);
     }
-  }, [activeFtueStage]);
+  }, [activeFtueStage, ftue7Scheduled]);
+
+  // FTUE 8: when both goals (slot 0 and 1) are completed, fade out the overlay
+  useEffect(() => {
+    if (activeFtueStage !== 'first_harvest_multi') return;
+    if (goalSlots[0] === 'completed' && goalSlots[1] === 'completed') setFtue8FadingOut(true);
+  }, [activeFtueStage, goalSlots]);
 
   const prevSeedLevelRef = useRef(0);
 
@@ -1395,8 +1407,8 @@ export default function App() {
         rafId = scheduleNextFrame(tick);
         return;
       }
-      // FTUE 5: harvest in free mode – don't advance progress
-      if (activeFtueStage === 'first_harvest') {
+      // FTUE 5–8 + gap before FTUE 7: harvest in free mode – don't advance progress
+      if (activeFtueStage === 'first_harvest' || activeFtueStage === 'first_goal_collect' || activeFtueStage === 'first_more_orders' || activeFtueStage === 'first_harvest_multi' || ftue7Scheduled) {
         rafId = scheduleNextFrame(tick);
         return;
       }
@@ -1420,7 +1432,7 @@ export default function App() {
     };
     rafId = scheduleNextFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [harvestSpeedLevel, isLoading, activeBoosts, activeFtueStage]);
+  }, [harvestSpeedLevel, isLoading, activeBoosts, activeFtueStage, ftue7Scheduled]);
 
   // Harvest tap zoom: TAP_BAR_PERCENT per tap when no charges (fast smooth zoom)
   useEffect(() => {
@@ -1647,8 +1659,10 @@ export default function App() {
   const handlePlantClick = (e: React.MouseEvent) => {
     e.stopPropagation();
 
-    // FTUE_2: must tap exactly 2 times to plant 2 seeds; block 3rd tap
-    if (activeFtueStage === 'seed_tap' && ftue2SeedFireCount >= 2) return;
+    // FTUE_2: must tap exactly 2 times to plant 2 seeds; block 3rd tap (ref so rapid taps can't slip through before state updates)
+    if (activeFtueStage === 'seed_tap' && (ftue2SeedFireCount >= 2 || ftue2SeedsBlockedRef.current)) return;
+    // FTUE_3: seeds button blocked during merge-drag step
+    if (activeFtueStage === 'merge_drag') return;
     // FTUE_7: must tap exactly 2 times; block 3rd tap
     if (activeFtueStage === 'first_more_orders' && ftue7SeedFireCount >= 2) return;
 
@@ -1682,8 +1696,9 @@ export default function App() {
           setFtue2SeedFireCount((c) => {
             const next = c + 1;
             if (next >= 2) {
+              ftue2SeedsBlockedRef.current = true;
               setFtue2FadingOut(true);
-              setTimeout(() => setActiveFtueStage('merge_drag'), 750); // Delay before FTUE_3
+              setTimeout(() => setActiveFtueStage('merge_drag'), 400); // Delay before FTUE_3 (match FTUE 2 fade-out so unblock is immediate)
             }
             return next;
           });
@@ -1692,7 +1707,10 @@ export default function App() {
         if (activeFtueStage === 'first_more_orders') {
           setFtue7SeedFireCount((c) => {
             const next = c + 1;
-            if (next >= 2) setFtue7FadingOut(true);
+            if (next >= 2) {
+              setFtue7FadingOut(true);
+              ftue8PendingLandCountRef.current = 2; // when both seeds land, start FTUE 8
+            }
             return next;
           });
         }
@@ -2859,7 +2877,7 @@ export default function App() {
                     transitionTimingFunction: isExpanded ? 'cubic-bezier(0.05, 0, 0, 1)' : 'cubic-bezier(0.22, 0, 0.12, 1)',
                   }}
                 >
-                   <div className="pointer-events-auto flex items-center justify-center" ref={plantButtonRef} style={{ transform: 'scale(0.9)', transformOrigin: 'center center', ...(ftueHideSeedsButton && { visibility: 'hidden' as const, pointerEvents: 'none' as const }) }} onClick={(e) => e.stopPropagation()}>
+                   <div className="pointer-events-auto flex items-center justify-center" ref={plantButtonRef} style={{ transform: 'scale(0.9)', transformOrigin: 'center center', ...(ftueHideSeedsButton && { visibility: 'hidden' as const, pointerEvents: 'none' as const }), ...(activeFtueStage === 'merge_drag' && { pointerEvents: 'none' as const }) }} onClick={(e) => e.stopPropagation()}>
 <SideAction
                         label="Plant"
                         icon={assetPath(`/assets/plants/plant_${seedLevel}.png`)}
@@ -2869,7 +2887,7 @@ export default function App() {
                         progressRef={seedProgressRef}
                         color="#a7c957"
                         isActive={activeTab === 'SEEDS' && isExpanded}
-                        isFlashing={seedsFreeMode ? (activeFtueStage === 'first_more_orders' ? (ftue7SeedFireCount >= 2 ? false : true) : (ftue2SeedFireCount >= 2 ? false : true)) : seedsInStorage > 0}
+                        isFlashing={seedsFreeMode ? (ftue7Scheduled ? false : (activeFtueStage === 'first_more_orders' ? (ftue7SeedFireCount >= 2 ? false : true) : (ftue2SeedFireCount >= 2 ? false : true))) : seedsInStorage > 0}
                         shouldAnimate={!isGridFull}
                         isBoardFull={isGridFull}
                         storageCount={seedsInStorage}
@@ -2887,7 +2905,7 @@ export default function App() {
                         progressRef={harvestProgressRef}
                         color="#a7c957"
                         isActive={activeTab === 'HARVEST' && isExpanded}
-                        isFlashing={harvestFreeMode ? (activeFtueStage === 'first_harvest' && goalSlots[0] === 'completed' ? false : true) : harvestCharges > 0}
+                        isFlashing={harvestFreeMode ? !(ftue7Scheduled || (activeFtueStage === 'first_harvest' && goalSlots[0] === 'completed') || activeFtueStage === 'first_goal_collect' || activeFtueStage === 'first_more_orders' || (activeFtueStage === 'first_harvest_multi' && goalSlots[0] === 'completed' && goalSlots[1] === 'completed')) : harvestCharges > 0}
                         shouldAnimate={true}
                         isBoardFull={false}
                         noRotateOnFlash={true}
@@ -3452,9 +3470,24 @@ export default function App() {
                 isActive={activeFtueStage === 'first_harvest'}
               />
             )}
+            {(activeFtueStage === 'first_harvest_multi' || ftue8FadingOut) && (
+              <Ftue8Overlay
+                buttonRect={harvestButtonRect}
+                isActive={activeFtueStage === 'first_harvest_multi'}
+                isFadingOut={ftue8FadingOut}
+                onFadeOutComplete={() => {
+                  setActiveFtueStage(null);
+                  setFtue8FadingOut(false);
+                }}
+              />
+            )}
             {/* FTUE_6: goal in coin state – textbox + finger on goal slot 0; only goal tappable; tap to collect and end */}
             {activeFtueStage === 'first_goal_collect' && (
               <Ftue6Overlay isActive={activeFtueStage === 'first_goal_collect'} />
+            )}
+            {/* Block all input from FTUE 6 collect until FTUE 7 overlay (finger + textbox) appears */}
+            {ftue7Scheduled && (
+              <div className="fixed inset-0 z-[98]" style={{ pointerEvents: 'auto' }} aria-hidden />
             )}
             {/* FTUE_7: more orders – textbox + finger at seeds; only seeds tappable; 2 taps then fade out */}
             {(activeFtueStage === 'first_more_orders' || ftue7FadingOut) && (
@@ -3463,9 +3496,9 @@ export default function App() {
                 isActive={activeFtueStage === 'first_more_orders'}
                 isFadingOut={ftue7FadingOut}
                 onFadeOutComplete={() => {
-                  setActiveFtueStage(null);
                   setFtue7FadingOut(false);
                   setFtue7SeedFireCount(0);
+                  setActiveFtueStage('first_harvest_multi'); // FTUE 8 starts immediately after FTUE 7 fades out
                 }}
               />
             )}
@@ -3540,8 +3573,8 @@ export default function App() {
                         setActiveFtueStage('first_goal');
                         setGoalSlots(['green', 'empty', 'empty', 'empty', 'empty']);
                         setGoalPlantTypes([2, 0, 0, 0, 0]);
-                        setGoalCounts([5, 0, 0, 0, 0]);
-                        setGoalAmountsRequired([5, 0, 0, 0, 0]);
+                        setGoalCounts([3, 0, 0, 0, 0]);
+                        setGoalAmountsRequired([3, 0, 0, 0, 0]);
                         setGoalDisplayOrder([0]);
                       }
                     }
@@ -3796,6 +3829,10 @@ export default function App() {
               data={p}
               appScale={appScale}
               onImpact={(targetIdx) => {
+                if (!p.isSpecialDelivery && ftue8PendingLandCountRef.current > 0) {
+                  ftue8PendingLandCountRef.current--;
+                  if (ftue8PendingLandCountRef.current === 0) setActiveFtueStage('first_harvest_multi');
+                }
                 if (p.isSpecialDelivery) {
                   // Special Delivery: spawn on empty cell or upgrade existing plant; then beam + bounce
                   const g = gridRef.current;

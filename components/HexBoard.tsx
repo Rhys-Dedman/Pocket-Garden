@@ -227,9 +227,11 @@ export const HexBoard: React.FC<HexBoardProps> = ({
     if (!cell?.item) {
       return;
     }
+    // FTUE_3: only allow starting a drag from cell 4 (not cell 13)
+    if (ftue3OnlyMerge4To13 && index !== 4) return;
     if (dragState && dragState.phase !== 'impact') return;
     startDrag(index, e.clientX, e.clientY);
-  }, [grid, dragState, startDrag, onLockedCellTap]);
+  }, [grid, dragState, startDrag, onLockedCellTap, ftue3OnlyMerge4To13]);
 
   // Global pointer move/up/cancel (attach in useEffect)
   useEffect(() => {

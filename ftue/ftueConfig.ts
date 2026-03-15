@@ -3,7 +3,7 @@
  * Each stage has: name, description (shown/hidden to player), behaviour, trigger.
  */
 
-export type FtueStageId = 'welcome' | 'seed_tap' | 'merge_drag' | 'first_goal' | 'first_harvest' | 'first_goal_collect' | 'first_more_orders';
+export type FtueStageId = 'welcome' | 'seed_tap' | 'merge_drag' | 'first_goal' | 'first_harvest' | 'first_goal_collect' | 'first_more_orders' | 'first_harvest_multi';
 
 export type FtueDescriptionVisibility = 'shown' | 'hidden';
 
@@ -72,6 +72,14 @@ export const FTUE_7: FtueStageDef = {
   trigger: 'after_ftue6_collect',
 };
 
+/** FTUE_8: Harvest multiple – same as FTUE 5 (textbox + finger at harvest); "You can harvest multiple plants at the same time". White harvest button until both goals done, then green + fade out. */
+export const FTUE_8: FtueStageDef = {
+  id: 'first_harvest_multi',
+  name: 'First Harvest Multi',
+  descriptionVisibility: 'shown',
+  trigger: 'after_ftue7_second_seed_lands',
+};
+
 export const FTUE_STAGES: Record<FtueStageId, FtueStageDef> = {
   welcome: FTUE_1,
   seed_tap: FTUE_2,
@@ -80,4 +88,5 @@ export const FTUE_STAGES: Record<FtueStageId, FtueStageDef> = {
   first_harvest: FTUE_5,
   first_goal_collect: FTUE_6,
   first_more_orders: FTUE_7,
+  first_harvest_multi: FTUE_8,
 };
