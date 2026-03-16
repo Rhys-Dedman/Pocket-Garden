@@ -3,7 +3,7 @@
  * Each stage has: name, description (shown/hidden to player), behaviour, trigger.
  */
 
-export type FtueStageId = 'welcome' | 'seed_tap' | 'merge_drag' | 'first_goal' | 'first_harvest' | 'first_goal_collect' | 'first_more_orders' | 'first_harvest_multi' | 'first_collect_both';
+export type FtueStageId = 'welcome' | 'seed_tap' | 'merge_drag' | 'first_goal' | 'first_harvest' | 'first_goal_collect' | 'first_more_orders' | 'first_harvest_multi' | 'first_collect_both' | 'first_upgrade';
 
 export type FtueDescriptionVisibility = 'shown' | 'hidden';
 
@@ -88,6 +88,14 @@ export const FTUE_9: FtueStageDef = {
   trigger: 'after_ftue8_close',
 };
 
+/** FTUE_10: After last goal coin collected – upgrade panel visible (closed), auto-open, swipe to Garden then Seeds, textbox "Use your coins to upgrade your garden", finger on first seeds upgrade purchase; on purchase set seeds/harvest to 100%. */
+export const FTUE_10: FtueStageDef = {
+  id: 'first_upgrade',
+  name: 'First Upgrade',
+  descriptionVisibility: 'shown',
+  trigger: 'after_ftue9_close',
+};
+
 export const FTUE_STAGES: Record<FtueStageId, FtueStageDef> = {
   welcome: FTUE_1,
   seed_tap: FTUE_2,
@@ -98,4 +106,5 @@ export const FTUE_STAGES: Record<FtueStageId, FtueStageDef> = {
   first_more_orders: FTUE_7,
   first_harvest_multi: FTUE_8,
   first_collect_both: FTUE_9,
+  first_upgrade: FTUE_10,
 };

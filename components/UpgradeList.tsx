@@ -129,6 +129,14 @@ interface UpgradeListProps {
   isExpanded?: boolean;
   /** Offer id whose popup is currently open; don't remove that offer from the list when timer hits 0 until popup is closed */
   protectedOfferId?: string | null;
+  /** FTUE 10: when set (e.g. 'seed_production'), flash this upgrade row green and add id to purchase button for finger overlay */
+  ftue10GreenFlashUpgradeId?: string | null;
+  /** FTUE 10: ref for the purchase button that gets the green flash (so App can measure rect for overlay) */
+  ftue10PurchaseButtonRef?: React.MutableRefObject<HTMLButtonElement | null>;
+  /** FTUE 10: when true, disable scroll so only the purchase button can be interacted with */
+  ftue10LockScroll?: boolean;
+  /** Called after an upgrade is purchased (for FTUE 10 completion) */
+  onUpgradePurchase?: (upgradeId: string) => void;
 }
 
 interface UpgradeDef {
@@ -217,6 +225,7 @@ const getUpgradeUnlockLevel = (upgradeId: string): number =>
  * This is the only cost used by the upgrade panel and handleUpgrade.
  */
 const calculateUpgradeCost = (upgradeId: string, currentLevel: number): number => {
+  if (upgradeId === 'seed_production' && currentLevel === 0) return 100;
   if (upgradeId === 'plot_expansion' || upgradeId === 'crop_value') {
     // First = 1500, then each = previous × 2.5 (rounded to nearest 5)
     if (currentLevel < 0) return 0;
@@ -466,7 +475,7 @@ export const createInitialHarvestState = (): Record<string, UpgradeState> => ({
   happy_customer: { level: 0, progress: 0 },
 });
 
-export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange, money, setMoney, seedsState: propsSeedsState, setSeedsState: propsSetSeedsState, harvestState: propsHarvestState, setHarvestState: propsSetHarvestState, cropsState: propsCropsState, setCropsState: propsSetCropsState, lockedCellCount = 0, onUnlockCell, fertilizableCellCount = 0, onFertilizeCell, highestPlantEver = 1, rewardedOffers = [], onRewardedOfferPanelClick, onRewardedOfferClick, playerLevel = 1, pendingUnlockUpgradeId = null, pendingOfferHighlightId = null, isExpanded = false, protectedOfferId = null }) => {
+export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange, money, setMoney, seedsState: propsSeedsState, setSeedsState: propsSetSeedsState, harvestState: propsHarvestState, setHarvestState: propsSetHarvestState, cropsState: propsCropsState, setCropsState: propsSetCropsState, lockedCellCount = 0, onUnlockCell, fertilizableCellCount = 0, onFertilizeCell, highestPlantEver = 1, rewardedOffers = [], onRewardedOfferPanelClick, onRewardedOfferClick, playerLevel = 1, pendingUnlockUpgradeId = null, pendingOfferHighlightId = null, isExpanded = false, protectedOfferId = null, ftue10GreenFlashUpgradeId = null, ftue10PurchaseButtonRef, ftue10LockScroll = false, onUpgradePurchase }) => {
   const [internalSeedsState, setInternalSeedsState] = useState<Record<string, UpgradeState>>(createInitialSeedsState);
   const seedsState = propsSeedsState ?? internalSeedsState;
   const setSeedsState = propsSetSeedsState ?? setInternalSeedsState;
@@ -809,6 +818,7 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
       
       return { ...prev, [id]: { level: newLevel, progress: 0 } };
     });
+    onUpgradePurchase?.(id);
   };
 
   const renderRewardedOfferItem = (offer: RewardedOffer) => {
@@ -924,7 +934,7 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
     const upgrades = getUpgradesForTab(category);
     const categoryOffers = rewardedOffers.filter(o => o.tab === category);
     return (
-    <div ref={(scrollRefs as any)[category]} className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-3 pt-3 space-y-2.5 overscroll-contain cursor-grab active:cursor-grabbing select-none" style={{ paddingBottom: 75 }}>
+    <div ref={(scrollRefs as any)[category]} className={`flex-1 min-h-0 no-scrollbar px-3 pt-3 space-y-2.5 overscroll-contain select-none ${ftue10LockScroll && category === activeTab ? '' : 'cursor-grab active:cursor-grabbing'}`} style={{ paddingBottom: 75, overflow: ftue10LockScroll && category === activeTab ? 'hidden' : 'auto', touchAction: ftue10LockScroll && category === activeTab ? 'none' : 'auto' }}>
       {/* Rewarded offers at top */}
       {categoryOffers.map(offer => renderRewardedOfferItem(offer))}
       {upgrades.map((upgrade) => {
@@ -932,7 +942,7 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
         const currentCost = getUpgradeCostValue(upgrade.id, state.level);
         const currentCostDisplay = getUpgradeCost(upgrade.id, state.level);
         const canAfford = money >= currentCost;
-        const isFlashing = flashingIds.has(upgrade.id);
+        const isFlashing = flashingIds.has(upgrade.id) || ftue10GreenFlashUpgradeId === upgrade.id;
         const isUnlockFlashing = unlockFlashIds.has(upgrade.id);
         const isPressed = pressedId === upgrade.id;
 
@@ -1039,7 +1049,9 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
               </div>
 
               {/* Price Button */}
-              <button 
+              <button
+                ref={ftue10GreenFlashUpgradeId === upgrade.id && ftue10PurchaseButtonRef ? (el) => { ftue10PurchaseButtonRef.current = el; } : undefined}
+                id={ftue10GreenFlashUpgradeId === upgrade.id ? `ftue10-purchase-${upgrade.id}` : undefined}
                 onMouseDown={() => !isLocked && !isMaxed && canAfford && setPressedId(upgrade.id)}
                 onMouseUp={() => setPressedId(null)}
                 onMouseLeave={() => setPressedId(null)}

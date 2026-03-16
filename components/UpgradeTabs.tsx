@@ -71,6 +71,7 @@ export const UpgradeTabs = forwardRef<UpgradeTabsRef, UpgradeTabsProps>(({ activ
         return (
           <button
             key={tab}
+            id={tab === 'HARVEST' ? 'ftue10-tab-orders' : tab === 'SEEDS' ? 'ftue10-tab-seeds' : undefined}
             onClick={() => onTabChange(tab)}
             className={`flex-1 flex flex-row items-center justify-center space-x-1.5 transition-all duration-300 active:scale-95 h-full relative z-10`}
             style={{ touchAction: 'manipulation' }}
