@@ -3,7 +3,18 @@
  * Each stage has: name, description (shown/hidden to player), behaviour, trigger.
  */
 
-export type FtueStageId = 'welcome' | 'seed_tap' | 'merge_drag' | 'first_goal' | 'first_harvest' | 'first_goal_collect' | 'first_more_orders' | 'first_harvest_multi' | 'first_collect_both' | 'first_upgrade';
+export type FtueStageId =
+  | 'welcome'
+  | 'seed_tap'
+  | 'merge_drag'
+  | 'first_goal'
+  | 'first_harvest'
+  | 'first_goal_collect'
+  | 'first_more_orders'
+  | 'first_harvest_multi'
+  | 'first_collect_both'
+  | 'first_upgrade'
+  | 'recharge_intro';
 
 export type FtueDescriptionVisibility = 'shown' | 'hidden';
 
@@ -96,6 +107,14 @@ export const FTUE_10: FtueStageDef = {
   trigger: 'after_ftue9_close',
 };
 
+/** FTUE_11: Recharge intro – popup explaining seeds/harvest recharge over time, plus 3 starter goals. */
+export const FTUE_11: FtueStageDef = {
+  id: 'recharge_intro',
+  name: 'Recharge Intro',
+  descriptionVisibility: 'shown',
+  trigger: 'after_ftue10_close',
+};
+
 export const FTUE_STAGES: Record<FtueStageId, FtueStageDef> = {
   welcome: FTUE_1,
   seed_tap: FTUE_2,
@@ -107,4 +126,5 @@ export const FTUE_STAGES: Record<FtueStageId, FtueStageDef> = {
   first_harvest_multi: FTUE_8,
   first_collect_both: FTUE_9,
   first_upgrade: FTUE_10,
+  recharge_intro: FTUE_11,
 };

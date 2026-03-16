@@ -38,6 +38,7 @@ import { Ftue7Overlay } from './components/Ftue7Overlay';
 import { Ftue8Overlay } from './components/Ftue8Overlay';
 import { Ftue9Overlay } from './components/Ftue9Overlay';
 import { Ftue10Overlay } from './components/Ftue10Overlay';
+import { Ftue11Overlay } from './components/Ftue11Overlay';
 import { TabType, ScreenType, BoardCell, Item, DragState } from './types';
 import type { FtueStageId } from './ftue/ftueConfig';
 import { assetPath } from './utils/assetPath';
@@ -502,6 +503,7 @@ export default function App() {
   const [ftue10Phase, setFtue10Phase] = useState<Ftue10Phase | null>(null);
   const [ftue10GreenFlashUpgradeId, setFtue10GreenFlashUpgradeId] = useState<string | null>(null);
   const [ftue10FadingOut, setFtue10FadingOut] = useState(false);
+  const [ftueSeedSurplusActivated, setFtueSeedSurplusActivated] = useState(false);
   /** FTUE 10: purchase button rect (measured in App like harvest/seed) so overlay uses same viewport coords */
   const [ftue10PurchaseButtonRect, setFtue10PurchaseButtonRect] = useState<DOMRect | null>(null);
   const ftue10PurchaseButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -513,13 +515,27 @@ export default function App() {
   const ftueHideHarvestButton = isLoading || activeFtueStage === 'welcome' || activeFtueStage === 'seed_tap' || activeFtueStage === 'merge_drag' || activeFtueStage === 'first_goal';
   /** FTUE: hide goals area during welcome/seed_tap/merge_drag (empty during FTUE 1–3) */
   const ftueHideGoals = activeFtueStage === 'welcome' || activeFtueStage === 'seed_tap' || activeFtueStage === 'merge_drag';
-  /** FTUE 1–4 (+ gap before FTUE 7): seeds button in "free" mode – 0% progress, badge "FREE"; green during ftue7Scheduled, white when FTUE 7 finger is showing */
-  const seedsFreeMode = activeFtueStage != null || ftue7Scheduled;
+  /**
+   * Seeds button in "free" mode – 0% progress, badge "FREE".
+   * - FTUE 1–9: whenever an FTUE is active (welcome → first_collect_both) or FTUE 7 scheduled.
+   * - Turns normal once FTUE 10 purchase happens (ftueSeedSurplusActivated true) and we no longer want FREE state.
+   * - Stays normal during FTUE 11 and beyond.
+   */
+  const seedsFreeMode =
+    !ftueSeedSurplusActivated &&
+    (
+      (
+        activeFtueStage != null &&
+        activeFtueStage !== 'first_upgrade' &&
+        activeFtueStage !== 'recharge_intro'
+      ) ||
+      ftue7Scheduled
+    );
   /**
    * Harvest button free mode:
    * - FTUE 5–8: first_harvest → first_goal_collect → first_more_orders → first_harvest_multi
-   * - FTUE 9–10: stays green through first_collect_both and first_upgrade
-   * - Turns normal only after FTUE 10 completes (harvest_speed purchased and overlay fades out)
+   * - FTUE 9: stays green through first_collect_both
+   * - Turns normal once FTUE 10 purchase happens (we do not include first_upgrade or ftue10FadingOut here)
    */
   const harvestFreeMode =
     activeFtueStage === 'first_harvest' ||
@@ -527,11 +543,10 @@ export default function App() {
     activeFtueStage === 'first_more_orders' ||
     activeFtueStage === 'first_harvest_multi' ||
     activeFtueStage === 'first_collect_both' ||
-    activeFtueStage === 'first_upgrade' ||
     ftue7Scheduled ||
     ftue8FadingOut ||
     ftue9FadingOut ||
-    ftue10FadingOut;
+    false;
   const [pendingUnlockUpgradeId, setPendingUnlockUpgradeId] = useState<string | null>(null);
   const nextWalletBurstIdRef = useRef(0);
   const nextGoalCoinBurstIdRef = useRef(0);
@@ -670,9 +685,10 @@ export default function App() {
     };
   }, [ftue10Phase, updateFtue10PurchaseButtonRect]);
 
-  // FTUE: keep seeds and harvest progress bars at 0% (reset refs + state when in FTUE or waiting for FTUE 7)
+  // FTUE: keep seeds and harvest progress bars at 0% (reset refs + state) during early FTUEs.
+  // After FTUE 10 (recharge_intro), allow normal recharge timers to run.
   useEffect(() => {
-    if (activeFtueStage != null || ftue7Scheduled) {
+    if ((activeFtueStage != null && activeFtueStage !== 'recharge_intro') || ftue7Scheduled) {
       seedProgressRef.current = 0;
       setSeedProgress(0);
     }
@@ -1114,8 +1130,9 @@ export default function App() {
         rafId = requestAnimationFrame(tick);
         return;
       }
-      // FTUE 1–4: seeds in free mode – don't advance progress
-      if (activeFtueStage != null) {
+      // FTUE 1–10: seeds in free mode – don't advance progress.
+      // Allow normal recharge during FTUE 11 (recharge_intro) and beyond.
+      if (activeFtueStage != null && activeFtueStage !== 'recharge_intro') {
         rafId = requestAnimationFrame(tick);
         return;
       }
@@ -2533,6 +2550,13 @@ export default function App() {
 
   return (
     <ErrorBoundary>
+      <>
+        <style>{`
+          @keyframes ftue11ButtonBounce {
+            0%, 100% { transform: scale(0.9); }
+            50% { transform: scale(1.0); }
+          }
+        `}</style>
       {/* Loading Screen */}
       {isLoading && (
         <LoadingScreen onLoadComplete={handleLoadComplete} />
@@ -2955,7 +2979,19 @@ export default function App() {
                     transitionTimingFunction: isExpanded ? 'cubic-bezier(0.05, 0, 0, 1)' : 'cubic-bezier(0.22, 0, 0.12, 1)',
                   }}
                 >
-                   <div className="pointer-events-auto flex items-center justify-center" ref={plantButtonRef} style={{ transform: 'scale(0.9)', transformOrigin: 'center center', ...(ftueHideSeedsButton && { visibility: 'hidden' as const, pointerEvents: 'none' as const }), ...(activeFtueStage === 'merge_drag' && { pointerEvents: 'none' as const }) }} onClick={(e) => e.stopPropagation()}>
+                   <div
+                     className="pointer-events-auto flex items-center justify-center"
+                     ref={plantButtonRef}
+                     style={{
+                       transformOrigin: 'center center',
+                       ...(activeFtueStage === 'recharge_intro'
+                         ? { animation: 'ftue11ButtonBounce 2s ease-in-out infinite' }
+                         : { transform: 'scale(0.9)' }),
+                       ...(ftueHideSeedsButton && { visibility: 'hidden' as const, pointerEvents: 'none' as const }),
+                       ...(activeFtueStage === 'merge_drag' && { pointerEvents: 'none' as const }),
+                     }}
+                     onClick={(e) => e.stopPropagation()}
+                   >
 <SideAction
                         label="Plant"
                         icon={assetPath(`/assets/plants/plant_${seedLevel}.png`)}
@@ -2975,7 +3011,18 @@ export default function App() {
                         onClick={handlePlantClick}
                       />
                    </div>
-                   <div className="pointer-events-auto flex items-center justify-center" ref={harvestButtonRef} style={{ transform: 'scale(0.9)', transformOrigin: 'center center', ...(ftueHideHarvestButton && { visibility: 'hidden' as const, pointerEvents: 'none' as const }) }} onClick={(e) => e.stopPropagation()}>
+                   <div
+                     className="pointer-events-auto flex items-center justify-center"
+                     ref={harvestButtonRef}
+                     style={{
+                       transformOrigin: 'center center',
+                       ...(activeFtueStage === 'recharge_intro'
+                         ? { animation: 'ftue11ButtonBounce 2s ease-in-out infinite' }
+                         : { transform: 'scale(0.9)' }),
+                       ...(ftueHideHarvestButton && { visibility: 'hidden' as const, pointerEvents: 'none' as const }),
+                     }}
+                     onClick={(e) => e.stopPropagation()}
+                   >
                      <SideAction 
                         label="Harvest" 
                         icon={assetPath('/assets/icons/icon_harvest.png')} 
@@ -3234,12 +3281,26 @@ export default function App() {
                         setFtue10Phase(null);
                         setFtue10GreenFlashUpgradeId(null);
                         setFtue10FadingOut(true);
+                        // End of FTUE 10: seeds/harvest fully recharged once, then return to normal timers.
                         seedProgressRef.current = 100;
                         setSeedProgress(100);
                         setHarvestCharges(HARVEST_CHARGES_MAX);
                         harvestChargesRef.current = HARVEST_CHARGES_MAX;
                         triggerSeedButtonLeafBurst();
                         triggerHarvestButtonLeafBurst();
+                        // Activate seed surplus feature (without unlocking upgrade in panel) and fire one surplus coin.
+                        setFtueSeedSurplusActivated(true);
+                        const surplusValue = getSeedSurplusValue({
+                          seed_surplus: { level: 1, progress: 0 },
+                        } as any);
+                        if (surplusValue > 0) {
+                          setMoney((prev) => prev + surplusValue);
+                        }
+                        // Set both progress bars to 80% so recharge continues from there.
+                        seedProgressRef.current = 80;
+                        setSeedProgress(80);
+                        harvestProgressRef.current = 80;
+                        setHarvestProgress(80);
                       }
                     }}
                     onRewardedOfferPanelClick={(offerId) => {
@@ -3634,8 +3695,57 @@ export default function App() {
                 purchaseButtonRect={ftue10PurchaseButtonRect}
                 isFadingOut={ftue10FadingOut}
                 onFadeOutComplete={() => {
-                  setActiveFtueStage(null);
+                  // FTUE 10 complete: close upgrade panel (to closed state) and show FTUE 11 recharge intro.
                   setFtue10FadingOut(false);
+                  setFtue10Phase(null);
+                  setIsExpanded(false);
+                  // Keep panel visible in closed state
+                  setFtueUpgradePanelVisible(true);
+                  setTimeout(() => {
+                    setActiveFtueStage('recharge_intro');
+                  }, 750);
+                }}
+              />
+            )}
+            {activeFtueStage === 'recharge_intro' && (
+              <Ftue11Overlay
+                seedButtonRect={seedButtonRect}
+                harvestButtonRect={harvestButtonRect}
+                onConfirm={() => {
+                  // End FTUE 11: stop any FTUE-only behavior and spawn three starter goals.
+                  setActiveFtueStage(null);
+                  const maxSlots = getMaxGoalSlots(playerLevel);
+                  const cropYieldLevel = getCropYieldPerHarvest(cropsState);
+                  const plantLevels = [1, 2, 3];
+                  const emptySlots: number[] = [];
+                  for (let i = 0; i < maxSlots && emptySlots.length < plantLevels.length; i++) {
+                    if (goalSlots[i] === 'empty') emptySlots.push(i);
+                  }
+                  emptySlots.forEach((slotIdx, index) => {
+                    const level = plantLevels[index];
+                    setTimeout(() => {
+                      setGoalSlots((prev) => {
+                        const next = [...prev];
+                        next[slotIdx] = 'green';
+                        return next;
+                      });
+                      setGoalPlantTypes((prev) => {
+                        const next = [...prev];
+                        next[slotIdx] = level;
+                        return next;
+                      });
+                      setGoalCounts((prev) => {
+                        const next = [...prev];
+                        next[slotIdx] = getGoalCropRequired(playerLevel, cropYieldLevel);
+                        return next;
+                      });
+                      setGoalDisplayOrder((prev) =>
+                        prev.includes(slotIdx) ? prev : [...prev, slotIdx]
+                      );
+                      setGoalSlotFadeInSlot(slotIdx);
+                      setTimeout(() => setGoalSlotFadeInSlot(null), 500);
+                    }, index * 250);
+                  });
                 }}
               />
             )}
@@ -4227,7 +4337,8 @@ export default function App() {
 
       </div>
       </div>
-    </div>
+      </div>
+      </>
     </ErrorBoundary>
   );
 }
