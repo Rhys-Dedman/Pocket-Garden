@@ -39,6 +39,7 @@ import { Ftue8Overlay } from './components/Ftue8Overlay';
 import { Ftue9Overlay } from './components/Ftue9Overlay';
 import { Ftue10Overlay } from './components/Ftue10Overlay';
 import { Ftue11Overlay } from './components/Ftue11Overlay';
+import { Ftue95Overlay } from './components/Ftue95Overlay';
 import { TabType, ScreenType, BoardCell, Item, DragState } from './types';
 import type { FtueStageId } from './ftue/ftueConfig';
 import { assetPath } from './utils/assetPath';
@@ -453,6 +454,7 @@ export default function App() {
   const [goalCoinLeafBursts, setGoalCoinLeafBursts] = useState<{ id: string; x: number; y: number; startTime: number }[]>([]);
   const [cellHighlightBeams, setCellHighlightBeams] = useState<{ id: string; x: number; y: number; cellWidth: number; cellHeight: number; startTime: number }[]>([]);
   const [activeCoinPanels, setActiveCoinPanels] = useState<CoinPanelData[]>([]);
+  const [coinPanelPortalRect, setCoinPanelPortalRect] = useState<{ left: number; top: number; width: number; height: number; scale: number } | null>(null);
   const [harvestBounceCellIndices, setHarvestBounceCellIndices] = useState<number[]>([]);
   const [walletFlashActive, setWalletFlashActive] = useState(false);
   const [walletBursts, setWalletBursts] = useState<{ id: number; trigger: number }[]>([]);
@@ -504,6 +506,48 @@ export default function App() {
   const [ftue10GreenFlashUpgradeId, setFtue10GreenFlashUpgradeId] = useState<string | null>(null);
   const [ftue10FadingOut, setFtue10FadingOut] = useState(false);
   const [ftueSeedSurplusActivated, setFtueSeedSurplusActivated] = useState(false);
+  const [ftue10PostClosePending, setFtue10PostClosePending] = useState(false);
+  const [ftue11StartQueued, setFtue11StartQueued] = useState(false);
+  const [ftue10BigBounceActive, setFtue10BigBounceActive] = useState(false);
+  const [ftue10ButtonsNormalEarly, setFtue10ButtonsNormalEarly] = useState(false);
+  const [ftue95ShowTextbox, setFtue95ShowTextbox] = useState(false);
+  const [ftue95FadingOut, setFtue95FadingOut] = useState(false);
+  const ftue11Delay1Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ftue11Delay2Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ftue11InFlightRef = useRef(false);
+  const ftue10BigBounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ftue95EnterTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ftue95StartOnceRef = useRef(false);
+
+  // FTUE 10 → 11: wait until upgrade panel is fully closed before setting progress to 80% + enabling surplus, then show FTUE 11
+  useEffect(() => {
+    if (!ftue11StartQueued) return;
+    // Panel closed height target is 50 (see useAnimatedPanelHeight). Wait until we reach it.
+    if (panelHeight > 50.5) return;
+
+    // Prevent double-scheduling if panelHeight fluctuates around the threshold.
+    if (ftue11InFlightRef.current) return;
+    ftue11InFlightRef.current = true;
+
+    if (ftue11Delay1Ref.current) clearTimeout(ftue11Delay1Ref.current);
+    if (ftue11Delay2Ref.current) clearTimeout(ftue11Delay2Ref.current);
+
+    // upgrade panel closes -> immediately set progress -> immediately show FTUE11 textbox
+    if (ftue10PostClosePending) {
+      setFtueSeedSurplusActivated(true);
+      seedProgressRef.current = 75;
+      setSeedProgress(75);
+      harvestProgressRef.current = 75;
+      setHarvestProgress(75);
+      setHarvestCharges(HARVEST_CHARGES_MAX);
+      harvestChargesRef.current = HARVEST_CHARGES_MAX;
+      setFtue10PostClosePending(false);
+    }
+
+    setActiveFtueStage('recharge_intro');
+    setFtue11StartQueued(false);
+    ftue11InFlightRef.current = false;
+  }, [ftue11StartQueued, panelHeight, ftue10PostClosePending]);
   /** FTUE 10: purchase button rect (measured in App like harvest/seed) so overlay uses same viewport coords */
   const [ftue10PurchaseButtonRect, setFtue10PurchaseButtonRect] = useState<DOMRect | null>(null);
   const ftue10PurchaseButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -517,36 +561,28 @@ export default function App() {
   const ftueHideGoals = activeFtueStage === 'welcome' || activeFtueStage === 'seed_tap' || activeFtueStage === 'merge_drag';
   /**
    * Seeds button in "free" mode – 0% progress, badge "FREE".
-   * - FTUE 1–9: whenever an FTUE is active (welcome → first_collect_both) or FTUE 7 scheduled.
-   * - Turns normal once FTUE 10 purchase happens (ftueSeedSurplusActivated true) and we no longer want FREE state.
-   * - Stays normal during FTUE 11 and beyond.
+   * - Stay green-free through FTUE 1–10 (including FTUE 10 close), and only switch to normal when FTUE 11 textbox shows.
    */
   const seedsFreeMode =
-    !ftueSeedSurplusActivated &&
     (
-      (
-        activeFtueStage != null &&
-        activeFtueStage !== 'first_upgrade' &&
-        activeFtueStage !== 'recharge_intro'
-      ) ||
+      (activeFtueStage != null && activeFtueStage !== 'recharge_intro') ||
       ftue7Scheduled
-    );
+    ) &&
+    !ftue10ButtonsNormalEarly;
   /**
    * Harvest button free mode:
-   * - FTUE 5–8: first_harvest → first_goal_collect → first_more_orders → first_harvest_multi
-   * - FTUE 9: stays green through first_collect_both
-   * - Turns normal once FTUE 10 purchase happens (we do not include first_upgrade or ftue10FadingOut here)
+   * - Stay green-free through FTUE 5–10 (including FTUE 10 close), and only switch to normal when FTUE 11 textbox shows.
    */
   const harvestFreeMode =
-    activeFtueStage === 'first_harvest' ||
-    activeFtueStage === 'first_goal_collect' ||
-    activeFtueStage === 'first_more_orders' ||
-    activeFtueStage === 'first_harvest_multi' ||
-    activeFtueStage === 'first_collect_both' ||
-    ftue7Scheduled ||
-    ftue8FadingOut ||
-    ftue9FadingOut ||
-    false;
+    (
+      (activeFtueStage != null && activeFtueStage !== 'recharge_intro') ||
+      ftue7Scheduled
+    ) &&
+    activeFtueStage !== 'welcome' &&
+    activeFtueStage !== 'seed_tap' &&
+    activeFtueStage !== 'merge_drag' &&
+    activeFtueStage !== 'first_goal' &&
+    !ftue10ButtonsNormalEarly;
   const [pendingUnlockUpgradeId, setPendingUnlockUpgradeId] = useState<string | null>(null);
   const nextWalletBurstIdRef = useRef(0);
   const nextGoalCoinBurstIdRef = useRef(0);
@@ -559,6 +595,69 @@ export default function App() {
   const plantButtonRef = useRef<HTMLDivElement>(null);
   const harvestButtonRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Coin panel portal: compute the scaled game-container position so coin panels can render above FTUE overlays.
+  useEffect(() => {
+    const update = () => {
+      const el = containerRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const s = appScaleRef.current || 1;
+      setCoinPanelPortalRect({ left: r.left, top: r.top, width: r.width / s, height: r.height / s, scale: s });
+    };
+    update();
+    window.addEventListener('resize', update);
+    const raf = requestAnimationFrame(update);
+    return () => {
+      window.removeEventListener('resize', update);
+      cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (ftue11Delay1Ref.current) clearTimeout(ftue11Delay1Ref.current);
+      if (ftue11Delay2Ref.current) clearTimeout(ftue11Delay2Ref.current);
+      if (ftue10BigBounceTimeoutRef.current) clearTimeout(ftue10BigBounceTimeoutRef.current);
+      if (ftue95EnterTimeoutRef.current) clearTimeout(ftue95EnterTimeoutRef.current);
+    };
+  }, []);
+
+  // FTUE 9.5: big bounce -> show textbox -> loop bounce until confirm
+  useEffect(() => {
+    if (activeFtueStage !== 'recharge_pre_upgrade') {
+      ftue95StartOnceRef.current = false;
+      setFtue95ShowTextbox(false);
+      setFtue95FadingOut(false);
+      return;
+    }
+    if (ftue95StartOnceRef.current) return;
+    ftue95StartOnceRef.current = true;
+
+    setFtue95ShowTextbox(false);
+    setFtue95FadingOut(false);
+
+    // Enable the recharge/surplus behavior now, and move bars to 75% to demonstrate quickly.
+    setFtueSeedSurplusActivated(true);
+    seedProgressRef.current = 75;
+    setSeedProgress(75);
+    harvestProgressRef.current = 75;
+    setHarvestProgress(75);
+    setHarvestCharges(HARVEST_CHARGES_MAX);
+    harvestChargesRef.current = HARVEST_CHARGES_MAX;
+
+    // Swap buttons to normal + leaf burst + big bounce.
+    setFtue10ButtonsNormalEarly(true);
+    triggerSeedButtonLeafBurst();
+    triggerHarvestButtonLeafBurst();
+    setFtue10BigBounceActive(true);
+    if (ftue10BigBounceTimeoutRef.current) clearTimeout(ftue10BigBounceTimeoutRef.current);
+    ftue10BigBounceTimeoutRef.current = setTimeout(() => setFtue10BigBounceActive(false), 500);
+
+    if (ftue95EnterTimeoutRef.current) clearTimeout(ftue95EnterTimeoutRef.current);
+    ftue95EnterTimeoutRef.current = setTimeout(() => {
+      setFtue95ShowTextbox(true);
+    }, 500);
+  }, [activeFtueStage]);
   const farmColumnRef = useRef<HTMLDivElement>(null);
   const hexAreaRef = useRef<HTMLDivElement>(null);
   const walletRef = useRef<HTMLButtonElement>(null);
@@ -686,9 +785,18 @@ export default function App() {
   }, [ftue10Phase, updateFtue10PurchaseButtonRect]);
 
   // FTUE: keep seeds and harvest progress bars at 0% (reset refs + state) during early FTUEs.
-  // After FTUE 10 (recharge_intro), allow normal recharge timers to run.
+  // After FTUE 10 purchase (ftue10FadingOut) and during FTUE 11 (recharge_intro), allow normal recharge timers to run.
   useEffect(() => {
-    if ((activeFtueStage != null && activeFtueStage !== 'recharge_intro') || ftue7Scheduled) {
+    const isFtue10PostPurchaseFade = activeFtueStage === 'first_upgrade' && ftue10FadingOut;
+    if (
+      (
+        activeFtueStage != null &&
+        activeFtueStage !== 'recharge_pre_upgrade' &&
+        activeFtueStage !== 'recharge_intro' &&
+        !isFtue10PostPurchaseFade
+      ) ||
+      ftue7Scheduled
+    ) {
       seedProgressRef.current = 0;
       setSeedProgress(0);
     }
@@ -696,7 +804,7 @@ export default function App() {
       harvestProgressRef.current = 0;
       setHarvestProgress(0);
     }
-  }, [activeFtueStage, ftue7Scheduled]);
+  }, [activeFtueStage, ftue7Scheduled, ftue10FadingOut]);
 
   // FTUE 8: when both goals (slot 0 and 1) are completed, start FTUE 9 immediately (block collect) and fade out FTUE 8 overlay
   useEffect(() => {
@@ -1130,9 +1238,13 @@ export default function App() {
         rafId = requestAnimationFrame(tick);
         return;
       }
-      // FTUE 1–10: seeds in free mode – don't advance progress.
-      // Allow normal recharge during FTUE 11 (recharge_intro) and beyond.
-      if (activeFtueStage != null && activeFtueStage !== 'recharge_intro') {
+    // FTUE: seeds in free mode – don't advance progress.
+    // Allow normal recharge during FTUE 9.5 (recharge_pre_upgrade) and beyond.
+    if (
+      activeFtueStage != null &&
+      activeFtueStage !== 'recharge_pre_upgrade' &&
+      activeFtueStage !== 'recharge_intro'
+    ) {
         rafId = requestAnimationFrame(tick);
         return;
       }
@@ -1424,7 +1536,11 @@ export default function App() {
     setTimeout(() => setIsSeedFlashing(false), 300);
 
     const seedsToAdd = 1;
-    const surplusValue = getSeedSurplusValue(seedsState);
+    const surplusValue = getSeedSurplusValue(
+      ftueSeedSurplusActivated
+        ? ({ ...seedsState, seed_surplus: { level: Math.max(1, seedsState?.seed_surplus?.level ?? 0), progress: 0 } } as any)
+        : seedsState
+    );
     const maxCap = getSeedStorageMax(seedsState);
 
     const total = seedsInStorage + seedsToAdd;
@@ -1457,11 +1573,12 @@ export default function App() {
           hoverX,
           hoverY,
           moveToWalletDelayMs: 0,
+          scale: 1.5,
         }));
         setActiveCoinPanels((p) => [...p, ...panelsToAdd]);
       }
     }
-  }, [seedProgress, isSeedFlashing, seedsInStorage, seedsState, seedStorageMax]);
+  }, [seedProgress, isSeedFlashing, seedsInStorage, seedsState, seedStorageMax, ftueSeedSurplusActivated]);
 
   const harvestProgressRef = useRef<number>(0);
   const harvestTapZoomRef = useRef<{ start: number; end: number; startTime: number; duration: number } | null>(null);
@@ -1612,7 +1729,7 @@ export default function App() {
   }, []);
 
   const handleTabChange = (tab: TabType) => {
-    if (activeFtueStage === 'first_upgrade' && ftue10Phase === 'point_orders' && tab === 'HARVEST') {
+    if (activeFtueStage === 'first_upgrade' && ftue10Phase === 'point_orders' && tab === 'SEEDS') {
       setIsExpanded(true);
       setFtue10Phase('panel_open_orders');
       return;
@@ -1842,7 +1959,11 @@ export default function App() {
     if (totalAfterTap > 100) {
       // Tap goes past 100%: add 1 seed (cap storage max). If already full, excess → surplus coin or lost.
       const remainder = totalAfterTap - 100;
-      const surplusValue = getSeedSurplusValue(seedsState);
+      const surplusValue = getSeedSurplusValue(
+        ftueSeedSurplusActivated
+          ? ({ ...seedsState, seed_surplus: { level: Math.max(1, seedsState?.seed_surplus?.level ?? 0), progress: 0 } } as any)
+          : seedsState
+      );
       if (seedsInStorage >= seedStorageMax && surplusValue > 0) {
         const container = containerRef.current;
         const plantBtn = plantButtonRef.current;
@@ -1858,7 +1979,7 @@ export default function App() {
           const panelHeightPx = 14;
           const offsetUp = (panelHeightPx / 2 + 4) * 1.2;
           const hoverY = (btnRect.top - containerRect.top) / scale - offsetUp;
-          setActiveCoinPanels((p) => [...p, { id: `seed-surplus-tap-${Date.now()}`, value: surplusValue, startX, startY, hoverX: startX, hoverY, moveToWalletDelayMs: 0 }]);
+          setActiveCoinPanels((p) => [...p, { id: `seed-surplus-tap-${Date.now()}`, value: surplusValue, startX, startY, hoverX: startX, hoverY, moveToWalletDelayMs: 0, scale: 1.5 }]);
         }
       }
       setSeedsInStorage((prev) => Math.min(seedStorageMax, prev + 1));
@@ -2440,7 +2561,11 @@ export default function App() {
         sp += seedMergeDelta;
         if (sp >= 100) {
           const remainder = sp - 100;
-          const surplusValue = getSeedSurplusValue(seedsState);
+          const surplusValue = getSeedSurplusValue(
+            ftueSeedSurplusActivated
+              ? ({ ...seedsState, seed_surplus: { level: Math.max(1, seedsState?.seed_surplus?.level ?? 0), progress: 0 } } as any)
+              : seedsState
+          );
           const maxCap = getSeedStorageMax(seedsState);
           setSeedsInStorage((prev) => {
             const wasFull = prev >= maxCap;
@@ -2471,6 +2596,7 @@ export default function App() {
                       hoverX: startX,
                       hoverY,
                       moveToWalletDelayMs: 0,
+                      scale: 1.5,
                     },
                   ])
                 );
@@ -2552,6 +2678,13 @@ export default function App() {
     <ErrorBoundary>
       <>
         <style>{`
+          @keyframes ftue11ButtonBigBounce {
+            0% { transform: scale(0.9); }
+            30% { transform: scale(1.2); }
+            55% { transform: scale(0.8); }
+            75% { transform: scale(0.95); }
+            100% { transform: scale(0.9); }
+          }
           @keyframes ftue11ButtonBounce {
             0%, 100% { transform: scale(0.9); }
             50% { transform: scale(1.0); }
@@ -2851,7 +2984,7 @@ export default function App() {
                     <div
                       key={slotIdx}
                       id={slotIdx === 0 ? 'goal-slot-0' : slotIdx === 1 ? 'goal-slot-1' : undefined}
-                      className={`absolute ${(isFadingIn || isFtue7RevealNoSlide) ? 'goal-no-transition' : 'goal-slide-over'} ${isFtue4Bounce ? 'goal-bounce-ftue4' : (isBouncing || goalSpawnBounceSlots.includes(slotIdx)) && !isFadingIn ? 'goal-bounce' : ''} ${isFadingIn && (isBouncing || goalSpawnBounceSlots.includes(slotIdx)) ? 'goal-slot-fade-in-with-bounce' : isFadingIn ? 'goal-slot-fade-in' : ''} ${isSlidingUp ? 'goal-slide-up' : ''} ${showCompletedContent ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'}`}
+                      className={`absolute ${(isFadingIn || isFtue7RevealNoSlide || goalSpawnBounceSlots.includes(slotIdx)) ? 'goal-no-transition' : 'goal-slide-over'} ${isFtue4Bounce ? 'goal-bounce-ftue4' : (isBouncing || goalSpawnBounceSlots.includes(slotIdx)) && !isFadingIn ? 'goal-bounce' : ''} ${isFadingIn && (isBouncing || goalSpawnBounceSlots.includes(slotIdx)) ? 'goal-slot-fade-in-with-bounce' : isFadingIn ? 'goal-slot-fade-in' : ''} ${isSlidingUp ? 'goal-slide-up' : ''} ${showCompletedContent ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'}`}
                       style={{
                         width: '105px',
                         height: '210px',
@@ -2984,7 +3117,9 @@ export default function App() {
                      ref={plantButtonRef}
                      style={{
                        transformOrigin: 'center center',
-                       ...(activeFtueStage === 'recharge_intro'
+                       ...(ftue10BigBounceActive
+                         ? { animation: 'ftue11ButtonBigBounce 500ms ease-in-out 1' }
+                         : (activeFtueStage === 'recharge_pre_upgrade' && ftue95ShowTextbox && !ftue95FadingOut)
                          ? { animation: 'ftue11ButtonBounce 2s ease-in-out infinite' }
                          : { transform: 'scale(0.9)' }),
                        ...(ftueHideSeedsButton && { visibility: 'hidden' as const, pointerEvents: 'none' as const }),
@@ -3016,7 +3151,9 @@ export default function App() {
                      ref={harvestButtonRef}
                      style={{
                        transformOrigin: 'center center',
-                       ...(activeFtueStage === 'recharge_intro'
+                       ...(ftue10BigBounceActive
+                         ? { animation: 'ftue11ButtonBigBounce 500ms ease-in-out 1' }
+                         : (activeFtueStage === 'recharge_pre_upgrade' && ftue95ShowTextbox && !ftue95FadingOut)
                          ? { animation: 'ftue11ButtonBounce 2s ease-in-out infinite' }
                          : { transform: 'scale(0.9)' }),
                        ...(ftueHideHarvestButton && { visibility: 'hidden' as const, pointerEvents: 'none' as const }),
@@ -3030,7 +3167,7 @@ export default function App() {
                         progressRef={harvestProgressRef}
                         color="#a7c957"
                         isActive={activeTab === 'HARVEST' && isExpanded}
-                        isFlashing={harvestFreeMode ? !(ftue7Scheduled || (activeFtueStage === 'first_harvest' && goalSlots[0] === 'completed') || activeFtueStage === 'first_goal_collect' || activeFtueStage === 'first_more_orders' || (activeFtueStage === 'first_harvest_multi' && goalSlots[0] === 'completed' && goalSlots[1] === 'completed')) : harvestCharges > 0}
+                        isFlashing={harvestFreeMode ? (activeFtueStage === 'first_harvest' || activeFtueStage === 'first_harvest_multi') : harvestCharges > 0}
                         shouldAnimate={true}
                         isBoardFull={false}
                         noRotateOnFlash={true}
@@ -3278,29 +3415,13 @@ export default function App() {
                     ftue10LockScroll={activeFtueStage === 'first_upgrade' && ftue10Phase === 'finger'}
                     onUpgradePurchase={(upgradeId) => {
                       if (upgradeId === 'harvest_speed' && activeFtueStage === 'first_upgrade') {
+                        // FTUE 10: on purchase, bounce Harvest button like a tap.
+                        setHarvestBounceTrigger((t) => t + 1);
                         setFtue10Phase(null);
                         setFtue10GreenFlashUpgradeId(null);
                         setFtue10FadingOut(true);
-                        // End of FTUE 10: seeds/harvest fully recharged once, then return to normal timers.
-                        seedProgressRef.current = 100;
-                        setSeedProgress(100);
-                        setHarvestCharges(HARVEST_CHARGES_MAX);
-                        harvestChargesRef.current = HARVEST_CHARGES_MAX;
-                        triggerSeedButtonLeafBurst();
-                        triggerHarvestButtonLeafBurst();
-                        // Activate seed surplus feature (without unlocking upgrade in panel) and fire one surplus coin.
-                        setFtueSeedSurplusActivated(true);
-                        const surplusValue = getSeedSurplusValue({
-                          seed_surplus: { level: 1, progress: 0 },
-                        } as any);
-                        if (surplusValue > 0) {
-                          setMoney((prev) => prev + surplusValue);
-                        }
-                        // Set both progress bars to 80% so recharge continues from there.
-                        seedProgressRef.current = 80;
-                        setSeedProgress(80);
-                        harvestProgressRef.current = 80;
-                        setHarvestProgress(80);
+                        // Defer the "return to normal" + seed surplus activation until the upgrade panel has fully closed.
+                        setFtue10PostClosePending(true);
                       }
                     }}
                     onRewardedOfferPanelClick={(offerId) => {
@@ -3679,9 +3800,31 @@ export default function App() {
                 onFadeOutComplete={() => {
                   setFtue9FadingOut(false);
                   setFtue9CollectedCount(0);
-                  // FTUE 10: reveal upgrade panel (closed on Orders), then auto-open and navigate to Garden
+                  // FTUE 9.5: recharge intro + bounce -> proceed to upgrade on confirm
+                  setFtueUpgradePanelVisible(false);
+                  setIsExpanded(false);
+                  setActiveFtueStage('recharge_pre_upgrade');
+                }}
+              />
+            )}
+            {(activeFtueStage === 'recharge_pre_upgrade' || ftue95FadingOut) && (
+              <Ftue95Overlay
+                seedButtonRect={seedButtonRect}
+                harvestButtonRect={harvestButtonRect}
+                isVisible={activeFtueStage === 'recharge_pre_upgrade' && ftue95ShowTextbox}
+                isFadingOut={ftue95FadingOut}
+                onConfirm={() => {
+                  setFtue95FadingOut(true);
+                }}
+                onFadeOutComplete={() => {
+                  setFtue95FadingOut(false);
+                  setFtue95ShowTextbox(false);
+                  // Stop bouncing once we leave this stage.
+                  setFtue10BigBounceActive(false);
+
+                  // FTUE 10: reveal upgrade panel (closed on Seeds), then user opens it manually (finger 1).
                   setFtueUpgradePanelVisible(true);
-                  setActiveTab('HARVEST');
+                  setActiveTab('SEEDS');
                   setIsExpanded(false);
                   setActiveFtueStage('first_upgrade');
                   setFtue10Phase('point_orders');
@@ -3695,15 +3838,14 @@ export default function App() {
                 purchaseButtonRect={ftue10PurchaseButtonRect}
                 isFadingOut={ftue10FadingOut}
                 onFadeOutComplete={() => {
-                  // FTUE 10 complete: close upgrade panel (to closed state) and show FTUE 11 recharge intro.
+                  // FTUE 10 complete: close upgrade panel; no bounce changes here.
                   setFtue10FadingOut(false);
                   setFtue10Phase(null);
                   setIsExpanded(false);
                   // Keep panel visible in closed state
                   setFtueUpgradePanelVisible(true);
-                  setTimeout(() => {
-                    setActiveFtueStage('recharge_intro');
-                  }, 750);
+                  // Show FTUE 11 after the upgrade panel is fully closed.
+                  setFtue11StartQueued(true);
                 }}
               />
             )}
@@ -3712,8 +3854,9 @@ export default function App() {
                 seedButtonRect={seedButtonRect}
                 harvestButtonRect={harvestButtonRect}
                 onConfirm={() => {
-                  // End FTUE 11: stop any FTUE-only behavior and spawn three starter goals.
                   setActiveFtueStage(null);
+
+                  // Spawn 3 starter goals (plant 1/2/3) with 0.5s stagger and bounce.
                   const maxSlots = getMaxGoalSlots(playerLevel);
                   const cropYieldLevel = getCropYieldPerHarvest(cropsState);
                   const plantLevels = [1, 2, 3];
@@ -3724,6 +3867,7 @@ export default function App() {
                   emptySlots.forEach((slotIdx, index) => {
                     const level = plantLevels[index];
                     setTimeout(() => {
+                      const required = getGoalCropRequired(playerLevel, cropYieldLevel);
                       setGoalSlots((prev) => {
                         const next = [...prev];
                         next[slotIdx] = 'green';
@@ -3736,15 +3880,20 @@ export default function App() {
                       });
                       setGoalCounts((prev) => {
                         const next = [...prev];
-                        next[slotIdx] = getGoalCropRequired(playerLevel, cropYieldLevel);
+                        next[slotIdx] = required;
                         return next;
                       });
-                      setGoalDisplayOrder((prev) =>
-                        prev.includes(slotIdx) ? prev : [...prev, slotIdx]
-                      );
-                      setGoalSlotFadeInSlot(slotIdx);
-                      setTimeout(() => setGoalSlotFadeInSlot(null), 500);
-                    }, index * 250);
+                      setGoalAmountsRequired((prev) => {
+                        const next = [...prev];
+                        next[slotIdx] = required;
+                        return next;
+                      });
+                      setGoalDisplayOrder((prev) => (prev.includes(slotIdx) ? prev : [...prev, slotIdx]));
+                      setGoalSpawnBounceSlots((prev) => (prev.includes(slotIdx) ? prev : [...prev, slotIdx]));
+                      setTimeout(() => {
+                        setGoalSpawnBounceSlots((prev) => prev.filter((s) => s !== slotIdx));
+                      }, 500);
+                    }, index * 500);
                   });
                 }}
               />
@@ -4161,34 +4310,55 @@ export default function App() {
               }}
             />
           ))}
-          {activeCoinPanels.map((coin) => (
-            <CoinPanel
-              key={coin.id}
-              data={coin}
-              containerRef={containerRef}
-              walletRef={walletRef}
-              walletIconRef={walletIconRef}
-              appScale={appScale}
-              activePanelCount={activeCoinPanels.length}
-              onImpact={(value) => {
-                pendingCoinImpactRef.current.total += value;
-                if (!pendingCoinImpactRef.current.scheduled) {
-                  pendingCoinImpactRef.current.scheduled = true;
-                  walletImpactFlushRafRef.current = requestAnimationFrame(() => {
-                    const total = pendingCoinImpactRef.current.total;
-                    pendingCoinImpactRef.current = { total: 0, scheduled: false };
-                    walletImpactFlushRafRef.current = 0;
-                    setMoney((prev) => prev + total);
-                    setWalletBounceTrigger((t) => t + 1);
-                    setWalletFlashActive(true);
-                    if (walletFlashTimeoutRef.current) clearTimeout(walletFlashTimeoutRef.current);
-                    walletFlashTimeoutRef.current = setTimeout(() => setWalletFlashActive(false), 120);
-                  });
-                }
-              }}
-              onComplete={() => setActiveCoinPanels(prev => prev.filter((c) => c.id !== coin.id))}
-            />
-          ))}
+          {createPortal(
+            coinPanelPortalRect ? (
+              <div
+                className="pointer-events-none overflow-visible"
+                style={{
+                  position: 'fixed',
+                  left: coinPanelPortalRect.left,
+                  top: coinPanelPortalRect.top,
+                  width: coinPanelPortalRect.width,
+                  height: coinPanelPortalRect.height,
+                  transform: `scale(${coinPanelPortalRect.scale})`,
+                  transformOrigin: 'top left',
+                  zIndex: 220,
+                }}
+              >
+                {activeCoinPanels.map((coin) => (
+                  <CoinPanel
+                    key={coin.id}
+                    data={coin}
+                    containerRef={containerRef}
+                    walletRef={walletRef}
+                    walletIconRef={walletIconRef}
+                    appScale={appScale}
+                    activePanelCount={activeCoinPanels.length}
+                    onImpact={(value) => {
+                      pendingCoinImpactRef.current.total += value;
+                      if (!pendingCoinImpactRef.current.scheduled) {
+                        pendingCoinImpactRef.current.scheduled = true;
+                        walletImpactFlushRafRef.current = requestAnimationFrame(() => {
+                          const total = pendingCoinImpactRef.current.total;
+                          pendingCoinImpactRef.current = { total: 0, scheduled: false };
+                          walletImpactFlushRafRef.current = 0;
+                          setMoney((prev) => prev + total);
+                          setWalletBounceTrigger((t) => t + 1);
+                          setWalletFlashActive(true);
+                          if (walletFlashTimeoutRef.current) clearTimeout(walletFlashTimeoutRef.current);
+                          walletFlashTimeoutRef.current = setTimeout(() => setWalletFlashActive(false), 120);
+                        });
+                      }
+                    }}
+                    onComplete={() => setActiveCoinPanels(prev => prev.filter((c) => c.id !== coin.id))}
+                  />
+                ))}
+              </div>
+            ) : (
+              <></>
+            ),
+            document.body
+          )}
           {activePlantPanels.map((panel) => (
             <PlantPanel
               key={panel.id}

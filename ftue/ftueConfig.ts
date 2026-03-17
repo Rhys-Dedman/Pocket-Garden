@@ -13,6 +13,7 @@ export type FtueStageId =
   | 'first_more_orders'
   | 'first_harvest_multi'
   | 'first_collect_both'
+  | 'recharge_pre_upgrade'
   | 'first_upgrade'
   | 'recharge_intro';
 
@@ -99,6 +100,14 @@ export const FTUE_9: FtueStageDef = {
   trigger: 'after_ftue8_close',
 };
 
+/** FTUE_9.5: Recharge pre-upgrade – explain recharge + bounce buttons, then proceed to upgrade. */
+export const FTUE_9_5: FtueStageDef = {
+  id: 'recharge_pre_upgrade',
+  name: 'Recharge Pre Upgrade',
+  descriptionVisibility: 'shown',
+  trigger: 'after_ftue9_close',
+};
+
 /** FTUE_10: After last goal coin collected – upgrade panel visible (closed), auto-open, swipe to Garden then Seeds, textbox "Use your coins to upgrade your garden", finger on first seeds upgrade purchase; on purchase set seeds/harvest to 100%. */
 export const FTUE_10: FtueStageDef = {
   id: 'first_upgrade',
@@ -125,6 +134,7 @@ export const FTUE_STAGES: Record<FtueStageId, FtueStageDef> = {
   first_more_orders: FTUE_7,
   first_harvest_multi: FTUE_8,
   first_collect_both: FTUE_9,
+  recharge_pre_upgrade: FTUE_9_5,
   first_upgrade: FTUE_10,
   recharge_intro: FTUE_11,
 };

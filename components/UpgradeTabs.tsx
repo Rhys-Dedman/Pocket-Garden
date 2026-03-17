@@ -104,8 +104,6 @@ export const UpgradeTabs = forwardRef<UpgradeTabsRef, UpgradeTabsProps>(({ activ
         style={{ 
           transitionDuration: isExpanded ? '700ms' : '250ms',
           transitionTimingFunction: isExpanded ? 'cubic-bezier(0.05, 0, 0, 1)' : 'cubic-bezier(0.22, 0, 0.12, 1)',
-        }}
-        style={{
           width: '28%',
           left: activeTab === 'SEEDS' ? '4%' : activeTab === 'CROPS' ? '36%' : '68%',
           backgroundColor: underlineColor,

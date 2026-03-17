@@ -2,35 +2,54 @@ import React, { useEffect, useState } from 'react';
 import { FTUE_TEXTBOX, FTUE_TEXTBOX_DIVIDER_MARGIN_BOTTOM, FTUE_TEXTBOX_TEXT } from '../ftue/ftueTextboxStyles';
 import { assetPath } from '../utils/assetPath';
 
-interface Ftue11OverlayProps {
+interface Ftue95OverlayProps {
   seedButtonRect: DOMRect | null;
   harvestButtonRect: DOMRect | null;
+  isVisible: boolean;
+  isFadingOut: boolean;
   onConfirm: () => void;
+  onFadeOutComplete: () => void;
 }
 
-export const Ftue11Overlay: React.FC<Ftue11OverlayProps> = ({
+const FADE_IN_MS = 700;
+const FADE_OUT_MS = 400;
+
+export const Ftue95Overlay: React.FC<Ftue95OverlayProps> = ({
   seedButtonRect,
   harvestButtonRect,
+  isVisible,
+  isFadingOut,
   onConfirm,
+  onFadeOutComplete,
 }) => {
   const [opacity, setOpacity] = useState(0);
 
   useEffect(() => {
+    if (!isVisible || isFadingOut) return;
+    setOpacity(0);
     const raf = requestAnimationFrame(() => setOpacity(1));
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [isVisible, isFadingOut]);
+
+  useEffect(() => {
+    if (!isFadingOut) return;
+    setOpacity(0);
+    const t = setTimeout(onFadeOutComplete, FADE_OUT_MS);
+    return () => clearTimeout(t);
+  }, [isFadingOut, onFadeOutComplete]);
+
+  if (!isVisible && !isFadingOut) return null;
 
   // Center horizontally between seed and harvest buttons if possible; otherwise screen center.
   let centerX = '50%';
-  let top: string | undefined = '45%';
   let bottom: string | undefined = undefined;
+  let top: string | undefined = '45%';
   let transform = 'translate(-50%, -50%)';
 
   if (seedButtonRect && harvestButtonRect) {
     const cx =
       (seedButtonRect.left + seedButtonRect.right + harvestButtonRect.left + harvestButtonRect.right) / 4;
     centerX = `${cx}px`;
-    // Pin textbox to a consistent screen position so it doesn't shift
     top = undefined;
     bottom = '330px';
     transform = 'translate(-50%, 0)';
@@ -38,7 +57,6 @@ export const Ftue11Overlay: React.FC<Ftue11OverlayProps> = ({
 
   return (
     <div className="fixed inset-0 z-[101] pointer-events-auto flex items-center justify-center">
-      {/* Transparent backdrop that blocks everything except the FTUE textbox/button */}
       <div className="absolute inset-0" aria-hidden />
 
       <div
@@ -49,10 +67,10 @@ export const Ftue11Overlay: React.FC<Ftue11OverlayProps> = ({
           bottom,
           transform,
           ...FTUE_TEXTBOX,
-          width: 480,
+          width: 550,
           maxWidth: 'calc(100vw - 16px)',
           opacity,
-          transition: 'opacity 700ms ease',
+          transition: `opacity ${isFadingOut ? FADE_OUT_MS : FADE_IN_MS}ms ease`,
         }}
       >
         <div
@@ -66,14 +84,10 @@ export const Ftue11Overlay: React.FC<Ftue11OverlayProps> = ({
             style={{ width: '100%' }}
           />
         </div>
-        <p
-          className="text-center m-0 italic leading-snug"
-          style={{ ...FTUE_TEXTBOX_TEXT, paddingLeft: '4px', paddingRight: '4px' }}
-        >
-          <span className="font-black">Nice Upgrade!</span>
+        <p className="text-center m-0 italic leading-snug" style={{ ...FTUE_TEXTBOX_TEXT, paddingLeft: '4px', paddingRight: '4px' }}>
+          <span className="font-medium">Seeds &amp; Harvests now recharge over time.</span>
           <br />
-          <span style={{ display: 'block', height: 6 }} />
-          <span className="font-medium">Looks like you're all ready to go!</span>
+          <span className="font-medium">Extra charges are turned into coins</span>
         </p>
         <div className="mt-4 flex justify-center">
           <button
@@ -98,7 +112,7 @@ export const Ftue11Overlay: React.FC<Ftue11OverlayProps> = ({
                 fontSize: '1.35rem',
               }}
             >
-              Lets Get Gardening!
+              Lets Upgrade Them
             </span>
           </button>
         </div>

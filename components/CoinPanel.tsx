@@ -46,6 +46,8 @@ export interface CoinPanelData {
   hoverX: number;
   hoverY: number;
   moveToWalletDelayMs: number;
+  /** Optional extra size multiplier (e.g. seed surplus panels) */
+  scale?: number;
 }
 
 interface CoinPanelProps {
@@ -95,9 +97,11 @@ export const CoinPanel: React.FC<CoinPanelProps> = ({
   const rafRef = useRef<number>(0);
 
   // Panel full size (flexible width by content); 50% smaller overall
-  const panelHeight = 28 * SIZE_SCALE;
-  const panelMinWidth = 56 * SIZE_SCALE;
-  const panelWidth = Math.max(panelMinWidth, (44 + String(data.value).length * 10) * SIZE_SCALE); // slightly bigger panel
+  const effectiveScale = SIZE_SCALE * (data.scale ?? 1);
+  const contentScaleMul = data.scale ?? 1;
+  const panelHeight = 28 * effectiveScale;
+  const panelMinWidth = 56 * effectiveScale;
+  const panelWidth = Math.max(panelMinWidth, (44 + String(data.value).length * 10) * effectiveScale); // slightly bigger panel
   const sizeW = sizeScale.w * panelWidth;
   const sizeH = sizeScale.h * panelHeight;
 
@@ -235,7 +239,7 @@ export const CoinPanel: React.FC<CoinPanelProps> = ({
   const circleDiameter = panelHeight;
 
   return (
-    <div className="absolute inset-0 pointer-events-none overflow-visible" style={{ zIndex: 75 }}>
+    <div className="absolute inset-0 pointer-events-none overflow-visible" style={{ zIndex: 120 }}>
       {/* Trail (like seed particle trail); skipped when many panels for FPS */}
       {useTrail && trail.length > 1 && (
         <svg className="absolute inset-0 w-full h-full overflow-visible" style={{ pointerEvents: 'none' }}>
@@ -293,19 +297,25 @@ export const CoinPanel: React.FC<CoinPanelProps> = ({
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 3,
-              paddingTop: 4,
-              paddingBottom: 4,
-              paddingLeft: 2,
-              paddingRight: 6,
+              gap: 3 * contentScaleMul,
+              paddingTop: 4 * contentScaleMul,
+              paddingBottom: 4 * contentScaleMul,
+              paddingLeft: 2 * contentScaleMul,
+              paddingRight: 6 * contentScaleMul,
               transform: `scale(${contentScale * 0.88})`,
               opacity: contentOpacity,
             }}
           >
-            <img src={assetPath('/assets/icons/icon_coin.png')} alt="" className="w-[15px] h-[15px] shrink-0 object-contain" aria-hidden />
+            <img
+              src={assetPath('/assets/icons/icon_coin.png')}
+              alt=""
+              className="shrink-0 object-contain"
+              aria-hidden
+              style={{ width: 15 * contentScaleMul, height: 15 * contentScaleMul }}
+            />
             <span
               className="font-black tabular-nums leading-none"
-              style={{ color: '#583c1f', letterSpacing: '-0.04em', fontSize: '11px' }}
+              style={{ color: '#583c1f', letterSpacing: '-0.04em', fontSize: `${11 * contentScaleMul}px` }}
             >
               {data.value}
             </span>
