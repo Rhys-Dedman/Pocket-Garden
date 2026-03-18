@@ -54,9 +54,11 @@ export const SideAction: React.FC<SideActionProps> = ({
   const baseRadius = 38;
   const expandedRadius = baseRadius * 1.1; // 10% increase = 41.8
   // Progress ring always uses baseRadius so it doesn't scale/transition during pulse (avoids -10% visual bug)
-  const progressRadius = baseRadius;
+  // Green-button version: make progress rings slightly narrower (inset a few px).
+  const progressRadius = isFlashing ? baseRadius : (baseRadius - 1);
   const circumference = 2 * Math.PI * progressRadius;
   const progressCircleRef = useRef<SVGCircleElement>(null);
+  const whiteHeadCircleRef = useRef<SVGCircleElement>(null);
   // White progress bar radius: on the inner edge of the white body circle (r=43)
   const whiteProgressRadius = 38;
   const whiteCircumference = 2 * Math.PI * whiteProgressRadius;
@@ -76,8 +78,10 @@ export const SideAction: React.FC<SideActionProps> = ({
       }
       const raw = progressRef.current;
       const pct = Math.max(0, Math.min(100, raw));
-      // Green progress bar hides when flashing or at 100%
-      const greenShow = isFlashingRef.current || pct >= 100 ? 0 : pct / 100;
+      // Green progress bar: always show actual progress (hide only at 100%)
+      const greenShow = pct >= 100 ? 0 : pct / 100;
+      const whiteHeadLead = 0.02;
+      const whiteHeadShow = greenShow > 0 ? Math.min(1, greenShow + whiteHeadLead) : 0;
       // White progress bar always tracks actual progress (visibility controlled by opacity)
       const whiteShow = pct / 100;
       
@@ -86,6 +90,13 @@ export const SideAction: React.FC<SideActionProps> = ({
         const offset = circumference - (greenShow * circumference);
         progressCircleRef.current.style.strokeDashoffset = String(offset);
         progressCircleRef.current.style.transition = 'none';
+      }
+
+      // White "head" ring (slightly ahead of the green completed ring)
+      if (whiteHeadCircleRef.current) {
+        const headOffset = circumference - (whiteHeadShow * circumference);
+        whiteHeadCircleRef.current.style.strokeDashoffset = String(headOffset);
+        whiteHeadCircleRef.current.style.transition = 'none';
       }
       
       // White version progress ring (always update, visibility via opacity)
@@ -103,8 +114,11 @@ export const SideAction: React.FC<SideActionProps> = ({
 
   // Clamp progress to 0–1 so the ring never shows negative or >100%; in free mode always show 0
   const clampedProgress = freeMode ? 0 : Math.max(0, Math.min(1, progress));
-  const displayProgress = (isFlashing || clampedProgress >= 1) ? 0 : clampedProgress;
+  const displayProgress = clampedProgress >= 1 ? 0 : clampedProgress;
+  const whiteHeadLead = 0.02;
+  const whiteHeadProgress = displayProgress > 0 ? Math.min(1, displayProgress + whiteHeadLead) : 0;
   const strokeDashoffset = circumference - (displayProgress * circumference);
+  const whiteHeadStrokeDashoffset = circumference - (whiteHeadProgress * circumference);
   const whiteStrokeDashoffset = whiteCircumference - (displayProgress * whiteCircumference);
 
   const isImageIcon = icon.startsWith('http') || icon.startsWith('/');
@@ -136,8 +150,8 @@ export const SideAction: React.FC<SideActionProps> = ({
     ? 'none'
     : 'stroke-dashoffset 0.08s cubic-bezier(0.25, 0.1, 0.25, 1)';
 
-  const progressBgColor = 'rgba(48, 56, 30, 0.5)';
-  const completedProgressColor = '#76953e';
+  const progressBgColor = isFlashing ? '#475c3b' : '#394a28';
+  const completedProgressColor = '#80aa16';
   // White version progress bar colors: upgrade button green for completed, storage text dark green for incomplete
   const whiteProgressCompletedColor = '#9db546'; // light green for completed progress
   const whiteProgressIncompleteColor = '#475c3b'; // storage text dark green
@@ -145,7 +159,10 @@ export const SideAction: React.FC<SideActionProps> = ({
   // Green bar: hides progress when flashing
   const greenPct = useRefDrive ? Math.max(0, Math.min(1, (progressRef?.current ?? 0) / 100)) : 0;
   const refDriveOffset = useRefDrive
-    ? circumference - ((isFlashing ? 0 : greenPct) * circumference)
+    ? circumference - (greenPct * circumference)
+    : (freeMode ? circumference : undefined);
+  const whiteHeadRefDriveOffset = useRefDrive
+    ? circumference - (Math.min(1, greenPct + whiteHeadLead) * circumference)
     : (freeMode ? circumference : undefined);
   // White bar: always shows actual progress
   const whiteRefDriveOffset = useRefDrive
@@ -253,8 +270,28 @@ export const SideAction: React.FC<SideActionProps> = ({
             r={progressRadius}
             fill="transparent"
             stroke={progressBgColor}
-            strokeWidth="2.88"
+            strokeWidth="3"
             style={{ transition: 'none' }}
+          />
+
+          {/* White "head" progress ring: sits above track but below green ring */}
+          <circle
+            ref={progressRef ? whiteHeadCircleRef : undefined}
+            cx="50"
+            cy="50"
+            r={progressRadius}
+            fill="transparent"
+            stroke="#f8edcb"
+            strokeWidth={isFlashing ? 3 : 2.5}
+            strokeLinecap="butt"
+            strokeDasharray={circumference}
+            style={{
+              strokeDashoffset: useRefDrive ? whiteHeadRefDriveOffset : whiteHeadStrokeDashoffset,
+              transition: useRefDrive ? 'none' : transitionStyle,
+              transform: 'rotate(90deg)',
+              transformOrigin: '50% 50%',
+              opacity: clampedProgress >= 1 ? 0 : 1
+            }}
           />
 
           {/* Progress Bar Ring - When progressRef is set, strokeDashoffset is driven at 60fps in useEffect */}
@@ -264,9 +301,9 @@ export const SideAction: React.FC<SideActionProps> = ({
             cy="50"
             r={progressRadius}
             fill="transparent"
-            stroke={isFlashing ? progressBgColor : completedProgressColor}
-            strokeWidth="2.88"
-            strokeLinecap="round"
+            stroke={completedProgressColor}
+            strokeWidth={isFlashing ? 4 : 3}
+            strokeLinecap="butt"
             strokeDasharray={circumference}
             style={{ 
               strokeDashoffset: useRefDrive ? refDriveOffset : strokeDashoffset,
@@ -285,10 +322,10 @@ export const SideAction: React.FC<SideActionProps> = ({
             r={whiteProgressRadius}
             fill="transparent"
             stroke={whiteProgressIncompleteColor}
-            strokeWidth="2"
+            strokeWidth="4"
             style={{ 
               transition: 'opacity 0.3s ease',
-              opacity: isFlashing ? 1 : 0
+              opacity: 0
             }}
           />
           {/* Progress Fill (light green - completed portion) */}
@@ -299,14 +336,14 @@ export const SideAction: React.FC<SideActionProps> = ({
             r={whiteProgressRadius}
             fill="transparent"
             stroke={whiteProgressCompletedColor}
-            strokeWidth="3"
+            strokeWidth="5"
             strokeDasharray={whiteCircumference}
             style={{ 
               strokeDashoffset: useRefDrive ? whiteRefDriveOffset : (isFlashing ? whiteStrokeDashoffset : whiteCircumference),
               transition: useRefDrive ? 'opacity 0.3s ease' : `opacity 0.3s ease, stroke-dashoffset 0.08s cubic-bezier(0.25, 0.1, 0.25, 1)`,
               transform: 'rotate(90deg)',
               transformOrigin: '50% 50%',
-              opacity: isFlashing ? 1 : 0
+              opacity: 0
             }}
           />
         </svg>
