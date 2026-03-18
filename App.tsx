@@ -571,6 +571,8 @@ export default function App() {
       (activeFtueStage != null && activeFtueStage !== 'recharge_intro') ||
       ftue7Scheduled
     ) &&
+    // During FTUE 10 ("first_upgrade") we still want to see normal seed progress.
+    activeFtueStage !== 'first_upgrade' &&
     !ftue10ButtonsNormalEarly;
   /**
    * Harvest button free mode:
