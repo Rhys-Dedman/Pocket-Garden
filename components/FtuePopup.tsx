@@ -228,7 +228,7 @@ export const FtuePopup: React.FC<FtuePopupProps> = ({
 
   return (
     <div
-      className="fixed inset-0 flex items-center justify-center pointer-events-auto"
+      className="absolute inset-0 flex items-center justify-center pointer-events-auto"
       style={{ zIndex: 100, overflow: 'hidden' }}
     >
       <div

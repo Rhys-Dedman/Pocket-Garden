@@ -4,31 +4,38 @@
  */
 import React, { useEffect, useState, useCallback } from 'react';
 import { assetPath } from '../utils/assetPath';
-import { FTUE_TEXTBOX, FTUE_TEXTBOX_DIVIDER_MARGIN_BOTTOM, FTUE_TEXTBOX_TEXT } from '../ftue/ftueTextboxStyles';
+import { FTUE_BLOCKER_TINT, FTUE_TEXTBOX, FTUE_TEXTBOX_DIVIDER_MARGIN_BOTTOM, FTUE_TEXTBOX_TEXT, FTUE_VISUAL_SCALE } from '../ftue/ftueTextboxStyles';
 
 const FADE_IN_MS = 250;
 const FADE_OUT_MS = 250;
 const HOLD_AT_4_MS = 180;
 const SLIDE_MS = 750;
-const FINGER_SIZE = 270;
+const FINGER_SIZE = 270 * FTUE_VISUAL_SCALE;
 const FINGER_ANGLE_DEG = -30;
+const TEXTBOX_OFFSET_UP_PX = 280; // base (pre-scale) px; multiplied by FTUE_VISUAL_SCALE
 
 const CELL_4_ID = 'hex-4';
 const CELL_13_ID = 'hex-13';
 
-function getCellCenterViewport(id: string): { x: number; y: number } | null {
+function getCellCenterInContainer(id: string, appScale: number): { x: number; y: number } | null {
+  const container = document.getElementById('game-container');
+  if (!container) return null;
+  const cr = container.getBoundingClientRect();
   const el = document.getElementById(id);
   if (!el) return null;
   const r = el.getBoundingClientRect();
-  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  return {
+    x: (r.left + r.width / 2 - cr.left) / appScale,
+    y: (r.top + r.height / 2 - cr.top) / appScale,
+  };
 }
 
-function getFingerStyle(center: { x: number; y: number }): React.CSSProperties {
+function getFingerStyle(center: { x: number; y: number }, fingerSize: number): React.CSSProperties {
   return {
-    left: center.x - FINGER_SIZE / 2,
-    top: center.y - FINGER_SIZE / 2,
-    width: FINGER_SIZE,
-    height: FINGER_SIZE,
+    left: center.x - fingerSize / 2,
+    top: center.y - fingerSize / 2,
+    width: fingerSize,
+    height: fingerSize,
     transform: `rotate(${FINGER_ANGLE_DEG}deg)`,
     transformOrigin: 'center center',
   };
@@ -37,6 +44,8 @@ function getFingerStyle(center: { x: number; y: number }): React.CSSProperties {
 export interface Ftue3OverlayProps {
   isActive: boolean;
   isFadingOut: boolean;
+  /** Current app scale (used to convert DOM rects to game-container coordinates) */
+  appScale: number;
   onFadeOutComplete: () => void;
 }
 
@@ -45,6 +54,7 @@ type Phase = 'fadeIn' | 'holdAt4' | 'slide' | 'fadeOut';
 export const Ftue3Overlay: React.FC<Ftue3OverlayProps> = ({
   isActive,
   isFadingOut,
+  appScale,
   onFadeOutComplete,
 }) => {
   const [pos4, setPos4] = useState<{ x: number; y: number } | null>(null);
@@ -55,15 +65,16 @@ export const Ftue3Overlay: React.FC<Ftue3OverlayProps> = ({
   const [fingerPos, setFingerPos] = useState<{ x: number; y: number } | null>(null);
 
   const measure = useCallback(() => {
-    const p4 = getCellCenterViewport(CELL_4_ID);
-    const p13 = getCellCenterViewport(CELL_13_ID);
+    const p4 = getCellCenterInContainer(CELL_4_ID, appScale);
+    const p13 = getCellCenterInContainer(CELL_13_ID, appScale);
     setPos4(p4);
     setPos13(p13);
     if (p4 && p13) {
       const midY = (p4.y + p13.y) / 2;
-      setTextboxTop(midY - 280);
+      // Keep the same visual spacing now that the textbox is scaled down.
+      setTextboxTop(midY - TEXTBOX_OFFSET_UP_PX * FTUE_VISUAL_SCALE);
     }
-  }, []);
+  }, [appScale]);
 
   useEffect(() => {
     if (!isActive && !isFadingOut) return;
@@ -121,24 +132,30 @@ export const Ftue3Overlay: React.FC<Ftue3OverlayProps> = ({
 
   if (!isActive && !isFadingOut) return null;
 
+  const fingerSize = FINGER_SIZE;
+
   const showContent = isActive && pos4 && pos13;
   const overlayOpacity = isFadingOut ? 0 : 1;
 
   return (
     <div
-      className="fixed inset-0 pointer-events-none"
+      className="absolute inset-0 pointer-events-none"
       style={{
         zIndex: 99,
         transition: `opacity ${FADE_OUT_MS}ms ease-out`,
         opacity: overlayOpacity,
       }}
     >
+      {/* Debug blocker tint (FTUE 3 doesn't use a hole blocker) */}
+      {showContent && (
+        <div className="absolute inset-0" style={{ backgroundColor: FTUE_BLOCKER_TINT, opacity: 1 }} aria-hidden />
+      )}
       {/* Finger: fades in at cell 4, slides to cell 13, fades out; loops */}
       {showContent && fingerPos && (
         <div
           className="absolute pointer-events-none"
           style={{
-            ...getFingerStyle(fingerPos),
+            ...getFingerStyle(fingerPos, fingerSize),
             opacity: fingerOpacity,
             transition:
               phase === 'fadeIn'
@@ -162,10 +179,11 @@ export const Ftue3Overlay: React.FC<Ftue3OverlayProps> = ({
       {/* Textbox: above the two plants; same style as FTUE_2; fades out with overlay */}
       {showContent && (
         <div
-          className="absolute left-1/2 -translate-x-1/2 pointer-events-none"
+          className="absolute left-1/2 pointer-events-none"
           style={{
             top: textboxTop,
             ...FTUE_TEXTBOX,
+            transform: 'translateX(-50%)',
           }}
         >
           <div className="w-full flex items-center justify-center" style={{ marginBottom: FTUE_TEXTBOX_DIVIDER_MARGIN_BOTTOM }}>

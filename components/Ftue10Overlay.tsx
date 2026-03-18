@@ -3,9 +3,9 @@
  * (2) Tap Orders → finger fades out, panel opens, finger down at Seeds tab + textbox, only Seeds tappable.
  * (3) Tap Seeds → navigate to Seeds, finger at purchase button, flash green; only purchase tappable. Buy closes FTUE.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { assetPath } from '../utils/assetPath';
-import { FTUE_TEXTBOX, FTUE_TEXTBOX_DIVIDER_MARGIN_BOTTOM, FTUE_TEXTBOX_TEXT } from '../ftue/ftueTextboxStyles';
+import { FTUE_BLOCKER_TINT, FTUE_TEXTBOX, FTUE_TEXTBOX_DIVIDER_MARGIN_BOTTOM, FTUE_TEXTBOX_TEXT, FTUE_VISUAL_SCALE } from '../ftue/ftueTextboxStyles';
 
 const FADE_IN_MS = 400;
 const FADE_OUT_MS = 400;
@@ -15,10 +15,10 @@ const FINGER2_FADE_MS = 700;
 const PANEL_OPEN_MS = 700;
 /** Wait for Orders→Garden tab slide to finish before showing finger 3 (slightly longer than content transition) */
 const FINGER3_DELAY_MS = 850;
-const FINGER_SIZE = 270;
-const FINGER_TAP_OFFSET_X = -14.14;
-const FINGER_TAP_OFFSET_Y = 14.14;
-const FINGER_TAP_DOWN_PX = 18;
+const FINGER_SIZE = 270 * FTUE_VISUAL_SCALE;
+const FINGER_TAP_OFFSET_X = -14.14 * FTUE_VISUAL_SCALE;
+const FINGER_TAP_OFFSET_Y = 14.14 * FTUE_VISUAL_SCALE;
+const FINGER_TAP_DOWN_PX = 18 * FTUE_VISUAL_SCALE;
 /** Expand hole so the tab/button is fully inside the tappable cutout (avoids blocking from rect drift). */
 const HOLE_PADDING_PX = 12;
 /** Finger 1: smaller hole (tighten width + height). */
@@ -26,40 +26,59 @@ const FINGER1_HOLE_SCALE_X = 0.75;
 const FINGER1_HOLE_SCALE_Y = 0.75;
 /** Extra-tight padding for finger 2 Garden-tab hole so the tappable area is smaller in both directions. */
 const GARDEN_HOLE_PADDING_PX = 1;
-/** Show blocker tint for finger 2 (Garden tab) when debugging alignment */
+/** Finger 2 blocker: shrink hole vertically (narrower Y). */
+const GARDEN_HOLE_SCALE_Y = 0.68;
+/** Debug: show blocker tint for finger 2 (Garden tab) */
 const DEBUG_FINGER2_BLOCKER_VISIBLE = false;
-/** Show blocker tint for finger 3 (purchase button) when debugging alignment */
+/** Debug: show blocker tint for finger 3 (purchase button) */
 const DEBUG_FINGER3_BLOCKER_VISIBLE = false;
-/** Show blocker tint for finger 1 (Seeds tab) when debugging alignment */
+/** Debug: show blocker tint for finger 1 (Seeds tab) */
 const DEBUG_FINGER1_BLOCKER_VISIBLE = false;
 const FTUE10_TAB_SEEDS_ID = 'ftue10-tab-seeds';
 const FTUE10_TAB_ORDERS_ID = 'ftue10-tab-orders';
 const FTUE10_TAB_GARDEN_ID = 'ftue10-tab-garden';
 
-function expandRect(r: DOMRect, padding: number): DOMRect {
-  return new DOMRect(
-    r.left - padding,
-    r.top - padding,
-    r.width + padding * 2,
-    r.height + padding * 2
-  );
+/** Finger 3 (purchase) blocker tuning */
+const PURCHASE_HOLE_SHIFT_RIGHT_PX = 40 * FTUE_VISUAL_SCALE;
+const PURCHASE_HOLE_SCALE_Y = 0.51; // slightly less tall vertically (top down, bottom up)
+/** Side blocker tightening for finger 3 (larger = more blocking inward) */
+const PURCHASE_BLOCK_LEFT_EXTRA_PX = 14 * FTUE_VISUAL_SCALE;
+const PURCHASE_BLOCK_RIGHT_EXTRA_PX = 26 * FTUE_VISUAL_SCALE;
+/** Finger 3 (purchase) finger nudge */
+const PURCHASE_FINGER_NUDGE_LEFT_PX = 10 * FTUE_VISUAL_SCALE; // down-left
+const PURCHASE_FINGER_NUDGE_DOWN_PX = 6 * FTUE_VISUAL_SCALE;
+
+type Rect = { left: number; top: number; width: number; height: number };
+const rectRight = (r: Rect) => r.left + r.width;
+const rectBottom = (r: Rect) => r.top + r.height;
+
+function expandRect(r: Rect, padding: number): Rect {
+  return {
+    left: r.left - padding,
+    top: r.top - padding,
+    width: r.width + padding * 2,
+    height: r.height + padding * 2,
+  };
 }
 
-function scaleRectFromCenter(r: DOMRect, scaleX: number, scaleY: number): DOMRect {
+function scaleRectFromCenter(r: Rect, scaleX: number, scaleY: number): Rect {
   const cx = r.left + r.width / 2;
   const cy = r.top + r.height / 2;
   const w = Math.max(1, r.width * scaleX);
   const h = Math.max(1, r.height * scaleY);
-  return new DOMRect(cx - w / 2, cy - h / 2, w, h);
+  return { left: cx - w / 2, top: cy - h / 2, width: w, height: h };
 }
 
 export type Ftue10Phase = 'point_orders' | 'panel_open_orders' | 'finger';
 
 export interface Ftue10OverlayProps {
-  harvestButtonRect: DOMRect | null;
+  /** Harvest button rect in game-container coordinates (448×796 space). */
+  harvestButtonRect: Rect | null;
   phase: Ftue10Phase | null;
-  /** Purchase button rect (measured in App like harvest/seed) so finger uses correct viewport coords */
-  purchaseButtonRect?: DOMRect | null;
+  /** Purchase button rect in game-container coordinates (448×796 space). */
+  purchaseButtonRect?: Rect | null;
+  /** Current app scale (used to convert DOM rects to game-container coordinates). */
+  appScale: number;
   isFadingOut?: boolean;
   onFadeOutComplete?: () => void;
 }
@@ -68,32 +87,46 @@ export const Ftue10Overlay: React.FC<Ftue10OverlayProps> = ({
   harvestButtonRect,
   phase,
   purchaseButtonRect: purchaseButtonRectProp = null,
+  appScale,
   isFadingOut = false,
   onFadeOutComplete,
 }) => {
+  const fingerSize = FINGER_SIZE;
+  const tapOffsetX = FINGER_TAP_OFFSET_X;
+  const tapOffsetY = FINGER_TAP_OFFSET_Y;
+  const tapDownPx = FINGER_TAP_DOWN_PX;
   const [opacity, setOpacity] = useState(0);
   const [fadeOutOpacity, setFadeOutOpacity] = useState(1);
   const [textboxOpacity, setTextboxOpacity] = useState(0);
   const [showPanelOpenContent, setShowPanelOpenContent] = useState(false);
   const [finger2Opacity, setFinger2Opacity] = useState(0);
   const [showFinger3, setShowFinger3] = useState(false);
-  const [seedsTabRect, setSeedsTabRect] = useState<DOMRect | null>(null);
-  const [ordersTabRect, setOrdersTabRect] = useState<DOMRect | null>(null);
-  const [gardenTabRect, setGardenTabRect] = useState<DOMRect | null>(null);
-  const [frozenPurchaseRect, setFrozenPurchaseRect] = useState<DOMRect | null>(null);
+  const [seedsTabRect, setSeedsTabRect] = useState<Rect | null>(null);
+  const [ordersTabRect, setOrdersTabRect] = useState<Rect | null>(null);
+  const [gardenTabRect, setGardenTabRect] = useState<Rect | null>(null);
+  const [frozenPurchaseRect, setFrozenPurchaseRect] = useState<Rect | null>(null);
   const textboxShownRef = useRef(false);
 
-  const measure = () => {
+  const measure = useCallback(() => {
+    const container = document.getElementById('game-container');
+    if (!container) return;
+    const cr = container.getBoundingClientRect();
     const s = document.getElementById(FTUE10_TAB_SEEDS_ID);
     const o = document.getElementById(FTUE10_TAB_ORDERS_ID);
     const g = document.getElementById(FTUE10_TAB_GARDEN_ID);
-    if (s) setSeedsTabRect(s.getBoundingClientRect());
-    else setSeedsTabRect(null);
-    if (o) setOrdersTabRect(o.getBoundingClientRect());
-    else setOrdersTabRect(null);
-    if (g) setGardenTabRect(g.getBoundingClientRect());
-    else setGardenTabRect(null);
-  };
+    if (s) {
+      const r = s.getBoundingClientRect();
+      setSeedsTabRect({ left: (r.left - cr.left) / appScale, top: (r.top - cr.top) / appScale, width: r.width / appScale, height: r.height / appScale });
+    } else setSeedsTabRect(null);
+    if (o) {
+      const r = o.getBoundingClientRect();
+      setOrdersTabRect({ left: (r.left - cr.left) / appScale, top: (r.top - cr.top) / appScale, width: r.width / appScale, height: r.height / appScale });
+    } else setOrdersTabRect(null);
+    if (g) {
+      const r = g.getBoundingClientRect();
+      setGardenTabRect({ left: (r.left - cr.left) / appScale, top: (r.top - cr.top) / appScale, width: r.width / appScale, height: r.height / appScale });
+    } else setGardenTabRect(null);
+  }, [appScale]);
 
   useEffect(() => {
     setOpacity(0);
@@ -118,7 +151,7 @@ export const Ftue10Overlay: React.FC<Ftue10OverlayProps> = ({
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', resize);
     };
-  }, [phase, isFadingOut]);
+  }, [phase, isFadingOut, measure]);
 
   useEffect(() => {
     if (!isFadingOut || !onFadeOutComplete) return;
@@ -160,7 +193,7 @@ export const Ftue10Overlay: React.FC<Ftue10OverlayProps> = ({
   useEffect(() => {
     if (phase === 'finger' && showFinger3 && purchaseButtonRectProp) {
       const r = purchaseButtonRectProp;
-      setFrozenPurchaseRect((prev) => prev ?? new DOMRect(r.left, r.top, r.width, r.height));
+      setFrozenPurchaseRect((prev) => prev ?? { left: r.left, top: r.top, width: r.width, height: r.height });
     }
   }, [phase, showFinger3, purchaseButtonRectProp]);
 
@@ -188,7 +221,7 @@ export const Ftue10Overlay: React.FC<Ftue10OverlayProps> = ({
 
   return (
     <div
-      className="fixed inset-0 pointer-events-none"
+      className="absolute inset-0 pointer-events-none"
       style={{
         zIndex: 99,
         transition: `opacity ${isFadingOut ? FADE_OUT_MS : FADE_IN_MS}ms ease-out`,
@@ -200,46 +233,58 @@ export const Ftue10Overlay: React.FC<Ftue10OverlayProps> = ({
         phase === 'point_orders' && seedsTabRect ? (
           (() => {
             const h = scaleRectFromCenter(seedsTabRect, FINGER1_HOLE_SCALE_X, FINGER1_HOLE_SCALE_Y);
-            const blockStyle = DEBUG_FINGER1_BLOCKER_VISIBLE ? { backgroundColor: 'rgba(255, 0, 0, 0.45)' as const } : {};
+            const blockStyle = DEBUG_FINGER1_BLOCKER_VISIBLE ? { backgroundColor: FTUE_BLOCKER_TINT as const } : {};
             return (
-              <div className="fixed inset-0 pointer-events-none">
+              <div className="absolute inset-0 pointer-events-none">
                 <div className="absolute left-0 top-0 right-0 pointer-events-auto" style={{ height: h.top, ...blockStyle }} />
                 <div className="absolute left-0 pointer-events-auto" style={{ top: h.top, width: h.left, height: h.height, ...blockStyle }} />
-                <div className="absolute top-0 bottom-0 pointer-events-auto" style={{ left: h.right, right: 0, ...blockStyle }} />
-                <div className="absolute left-0 right-0 bottom-0 pointer-events-auto" style={{ top: h.bottom, ...blockStyle }} />
+                <div className="absolute top-0 bottom-0 pointer-events-auto" style={{ left: rectRight(h), right: 0, ...blockStyle }} />
+                <div className="absolute left-0 right-0 bottom-0 pointer-events-auto" style={{ top: rectBottom(h), ...blockStyle }} />
               </div>
             );
           })()
         ) : phase === 'panel_open_orders' && gardenTabRect ? (
           (() => {
-            const h = expandRect(gardenTabRect, GARDEN_HOLE_PADDING_PX);
-            const blockStyle = DEBUG_FINGER2_BLOCKER_VISIBLE ? { backgroundColor: 'rgba(255, 0, 0, 0.45)' as const } : {};
+            const h = scaleRectFromCenter(
+              expandRect(gardenTabRect, GARDEN_HOLE_PADDING_PX),
+              1,
+              GARDEN_HOLE_SCALE_Y
+            );
+            const blockStyle = DEBUG_FINGER2_BLOCKER_VISIBLE ? { backgroundColor: FTUE_BLOCKER_TINT as const } : {};
             return (
-              <div className="fixed inset-0 pointer-events-none">
+              <div className="absolute inset-0 pointer-events-none">
                 <div className="absolute left-0 top-0 right-0 pointer-events-auto" style={{ height: h.top, ...blockStyle }} />
                 <div className="absolute left-0 pointer-events-auto" style={{ top: h.top, width: h.left, height: h.height, ...blockStyle }} />
-                <div className="absolute top-0 bottom-0 pointer-events-auto" style={{ left: h.right, right: 0, ...blockStyle }} />
-                <div className="absolute left-0 right-0 bottom-0 pointer-events-auto" style={{ top: h.bottom, ...blockStyle }} />
+                <div className="absolute top-0 bottom-0 pointer-events-auto" style={{ left: rectRight(h), right: 0, ...blockStyle }} />
+                <div className="absolute left-0 right-0 bottom-0 pointer-events-auto" style={{ top: rectBottom(h), ...blockStyle }} />
               </div>
             );
           })()
         ) : isFingerPhase && showFinger3 && purchaseButtonRect ? (
           (() => {
-            const h = purchaseButtonRect;
-            const rightBlockerStart = Math.max(0, h.right - 90);
-            const leftBlockerWidth = Math.max(0, h.left - 80);
-            const blockStyle = DEBUG_FINGER3_BLOCKER_VISIBLE ? { backgroundColor: 'rgba(255, 0, 0, 0.45)' as const } : {};
+            const h = scaleRectFromCenter(
+              expandRect(
+                { ...purchaseButtonRect, left: purchaseButtonRect.left + PURCHASE_HOLE_SHIFT_RIGHT_PX },
+                HOLE_PADDING_PX
+              ),
+              1,
+              PURCHASE_HOLE_SCALE_Y
+            );
+            // Tighten hole from both sides: left blocker moves right, right blocker moves left
+            const rightBlockerStart = Math.max(0, rectRight(h) - (90 + PURCHASE_BLOCK_RIGHT_EXTRA_PX));
+            const leftBlockerWidth = Math.max(0, h.left - Math.max(0, 80 - PURCHASE_BLOCK_LEFT_EXTRA_PX));
+            const blockStyle = DEBUG_FINGER3_BLOCKER_VISIBLE ? { backgroundColor: FTUE_BLOCKER_TINT as const } : {};
             return (
-              <div className="fixed inset-0 pointer-events-none">
+              <div className="absolute inset-0 pointer-events-none">
                 <div className="absolute left-0 top-0 right-0 pointer-events-auto" style={{ height: h.top, ...blockStyle }} />
                 <div className="absolute left-0 pointer-events-auto" style={{ top: h.top, width: leftBlockerWidth, height: h.height, ...blockStyle }} />
                 <div className="absolute top-0 bottom-0 pointer-events-auto" style={{ left: rightBlockerStart, right: 0, ...blockStyle }} />
-                <div className="absolute left-0 right-0 bottom-0 pointer-events-auto" style={{ top: h.bottom, ...blockStyle }} />
+                <div className="absolute left-0 right-0 bottom-0 pointer-events-auto" style={{ top: rectBottom(h), ...blockStyle }} />
               </div>
             );
           })()
         ) : (
-          <div className="fixed inset-0 pointer-events-auto" aria-hidden />
+          <div className="absolute inset-0 pointer-events-auto" aria-hidden />
         )
       )}
 
@@ -248,10 +293,10 @@ export const Ftue10Overlay: React.FC<Ftue10OverlayProps> = ({
         <div
           className="absolute pointer-events-none"
           style={{
-            left: seedsTabRect.left + seedsTabRect.width / 2 - FINGER_SIZE / 2 + 135,
-            top: seedsTabRect.top - FINGER_SIZE - 125,
-            width: FINGER_SIZE,
-            height: FINGER_SIZE,
+            left: seedsTabRect.left + seedsTabRect.width / 2 - fingerSize / 2 + 135 * FTUE_VISUAL_SCALE,
+            top: seedsTabRect.top - fingerSize - 125 * FTUE_VISUAL_SCALE,
+            width: fingerSize,
+            height: fingerSize,
             transformOrigin: 'center bottom',
             animation: 'ftue10FingerDownOrders 1.2s ease-in-out infinite',
           }}
@@ -259,7 +304,7 @@ export const Ftue10Overlay: React.FC<Ftue10OverlayProps> = ({
           <style>{`
             @keyframes ftue10FingerDownOrders {
               0%, 100% { transform: translate(0, 0) rotate(-150deg); }
-              50% { transform: translate(${-FINGER_TAP_DOWN_PX * 0.5}px, ${FINGER_TAP_DOWN_PX}px) rotate(-150deg); }
+              50% { transform: translate(${-tapDownPx * 0.5}px, ${tapDownPx}px) rotate(-150deg); }
             }
           `}</style>
           <img
@@ -276,10 +321,10 @@ export const Ftue10Overlay: React.FC<Ftue10OverlayProps> = ({
         <div
           className="absolute pointer-events-none"
           style={{
-            left: gardenTabRect.left + gardenTabRect.width / 2 - FINGER_SIZE / 2 - 40,
-            top: gardenTabRect.top - FINGER_SIZE - 135,
-            width: FINGER_SIZE,
-            height: FINGER_SIZE,
+            left: gardenTabRect.left + gardenTabRect.width / 2 - fingerSize / 2 - 40 * FTUE_VISUAL_SCALE,
+            top: gardenTabRect.top - fingerSize - 135 * FTUE_VISUAL_SCALE,
+            width: fingerSize,
+            height: fingerSize,
             transformOrigin: 'center bottom',
             animation: 'ftue10FingerDown 1.2s ease-in-out infinite',
             opacity: finger2Opacity,
@@ -289,7 +334,7 @@ export const Ftue10Overlay: React.FC<Ftue10OverlayProps> = ({
           <style>{`
             @keyframes ftue10FingerDown {
               0%, 100% { transform: translateY(0) rotate(180deg); }
-              50% { transform: translateY(${FINGER_TAP_DOWN_PX}px) rotate(180deg); }
+              50% { transform: translateY(${tapDownPx}px) rotate(180deg); }
             }
           `}</style>
           <img
@@ -306,10 +351,10 @@ export const Ftue10Overlay: React.FC<Ftue10OverlayProps> = ({
         <div
           className="absolute pointer-events-none"
           style={{
-            left: purchaseButtonRect.left + purchaseButtonRect.width / 2 - FINGER_SIZE / 2 - 100,
-            top: purchaseButtonRect.top + purchaseButtonRect.height / 2 - FINGER_SIZE / 2,
-            width: FINGER_SIZE,
-            height: FINGER_SIZE,
+            left: purchaseButtonRect.left + purchaseButtonRect.width / 2 - fingerSize / 2 - 100 * FTUE_VISUAL_SCALE - PURCHASE_FINGER_NUDGE_LEFT_PX,
+            top: purchaseButtonRect.top + purchaseButtonRect.height / 2 - fingerSize / 2 + PURCHASE_FINGER_NUDGE_DOWN_PX,
+            width: fingerSize,
+            height: fingerSize,
             transformOrigin: 'center center',
             animation: 'ftue5FingerPoint 1.2s ease-in-out infinite',
           }}
@@ -317,7 +362,7 @@ export const Ftue10Overlay: React.FC<Ftue10OverlayProps> = ({
           <style>{`
             @keyframes ftue5FingerPoint {
               0%, 100% { transform: translate(0, 0) scaleX(-1) rotate(-45deg); }
-              50% { transform: translate(${FINGER_TAP_OFFSET_X}px, ${FINGER_TAP_OFFSET_Y}px) scaleX(-1) rotate(-45deg); }
+              50% { transform: translate(${tapOffsetX}px, ${tapOffsetY}px) scaleX(-1) rotate(-45deg); }
             }
           `}</style>
           <img
@@ -332,14 +377,14 @@ export const Ftue10Overlay: React.FC<Ftue10OverlayProps> = ({
       {/* Textbox: center of screen (slightly high) for panel_open_orders and finger phase */}
       {harvestButtonRect && showTextbox && (
         <div
-          className="fixed pointer-events-none"
+          className="absolute pointer-events-none"
           style={{
             left: '50%',
             top: '40%',
             transform: 'translateX(-50%)',
             ...FTUE_TEXTBOX,
-            width: 360,
-            maxWidth: 'calc(100vw - 40px)',
+            width: 360 * FTUE_VISUAL_SCALE,
+            maxWidth: 'calc(100% - 40px)',
             opacity: textboxOpacity,
             transition: `opacity ${(phase === 'panel_open_orders' && showPanelOpenContent) ? FINGER2_FADE_MS : TEXTBOX_FADE_IN_MS}ms ease-out`,
           }}

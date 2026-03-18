@@ -4,7 +4,7 @@
  */
 import React, { useEffect, useState, useCallback } from 'react';
 import { assetPath } from '../utils/assetPath';
-import { FTUE_TEXTBOX, FTUE_TEXTBOX_DIVIDER_MARGIN_BOTTOM, FTUE_TEXTBOX_TEXT } from '../ftue/ftueTextboxStyles';
+import { FTUE_BLOCKER_TINT, FTUE_TEXTBOX, FTUE_TEXTBOX_DIVIDER_MARGIN_BOTTOM, FTUE_TEXTBOX_TEXT, FTUE_VISUAL_SCALE } from '../ftue/ftueTextboxStyles';
 
 const FADE_OUT_MS = 400;
 const GOAL_SLOT_0_ID = 'goal-slot-0';
@@ -17,6 +17,8 @@ const buttonPressedBg = '#9fc044';
 export interface Ftue4OverlayProps {
   isActive: boolean;
   isFadingOut: boolean;
+  /** Current app scale (used to convert DOM rects to game-container coordinates) */
+  appScale: number;
   onLetsHarvest: () => void;
   onFadeOutComplete: () => void;
 }
@@ -24,6 +26,7 @@ export interface Ftue4OverlayProps {
 export const Ftue4Overlay: React.FC<Ftue4OverlayProps> = ({
   isActive,
   isFadingOut,
+  appScale,
   onLetsHarvest,
   onFadeOutComplete,
 }) => {
@@ -32,17 +35,24 @@ export const Ftue4Overlay: React.FC<Ftue4OverlayProps> = ({
   const [overlayOpacity, setOverlayOpacity] = useState(0);
 
   const measure = useCallback(() => {
+    const container = document.getElementById('game-container');
+    if (!container) return;
+    const cr = container.getBoundingClientRect();
     const el = document.getElementById(GOAL_SLOT_0_ID);
     if (!el) return;
     const r = el.getBoundingClientRect();
+    const left = (r.right - cr.left) / appScale;
+    const top = (r.top - cr.top) / appScale;
+    const height = r.height / appScale;
     setTextboxStyle({
-      position: 'fixed',
-      left: r.right + 0,
-      top: r.top + r.height / 2 - 120,
+      position: 'absolute',
+      left,
+      // Keep the same visual offset now that the textbox is scaled down.
+      top: top + height / 2 - 120 * FTUE_VISUAL_SCALE,
       opacity: 1,
       zIndex: 100,
     });
-  }, []);
+  }, [appScale]);
 
   useEffect(() => {
     if (!isActive && !isFadingOut) return;
@@ -75,7 +85,7 @@ export const Ftue4Overlay: React.FC<Ftue4OverlayProps> = ({
 
   return (
     <div
-      className="fixed inset-0"
+      className="absolute inset-0"
       style={{
         zIndex: 99,
         pointerEvents: isFadingOut ? 'none' : 'auto',
@@ -84,7 +94,7 @@ export const Ftue4Overlay: React.FC<Ftue4OverlayProps> = ({
       }}
     >
       {/* Blocking layer: only the textbox button is tappable (textbox rendered on top with pointer-events-auto) */}
-      <div className="absolute inset-0" style={{ pointerEvents: 'auto' }} aria-hidden />
+      <div className="absolute inset-0" style={{ pointerEvents: 'auto', backgroundColor: FTUE_BLOCKER_TINT }} aria-hidden />
 
       {/* Textbox: next to goal slot 0, with "Lets Harvest!" button */}
       <div
@@ -92,7 +102,7 @@ export const Ftue4Overlay: React.FC<Ftue4OverlayProps> = ({
         style={{
           ...FTUE_TEXTBOX,
           ...textboxStyle,
-          width: '440px',
+          width: `${440 * FTUE_VISUAL_SCALE}px`,
           transition: `opacity ${FADE_OUT_MS}ms ease-out`,
           opacity: isFadingOut ? 0 : textboxStyle.opacity ?? 1,
         }}
@@ -118,16 +128,16 @@ export const Ftue4Overlay: React.FC<Ftue4OverlayProps> = ({
           }}
           className="flex items-center justify-center rounded-xl transition-all border-0 cursor-pointer mx-auto"
           style={{
-            height: '56px',
-            minWidth: '180px',
-            maxWidth: '220px',
+            height: `${56 * FTUE_VISUAL_SCALE}px`,
+            minWidth: `${180 * FTUE_VISUAL_SCALE}px`,
+            maxWidth: `${220 * FTUE_VISUAL_SCALE}px`,
             backgroundColor: buttonPressed ? buttonPressedBg : buttonBgColor,
-            border: `4px solid ${buttonBorderColor}`,
-            borderRadius: '16px',
+            border: `${4 * FTUE_VISUAL_SCALE}px solid ${buttonBorderColor}`,
+            borderRadius: `${16 * FTUE_VISUAL_SCALE}px`,
             boxShadow: buttonPressed
               ? 'inset 0 4px 8px rgba(0,0,0,0.15)'
               : `0 6px 0 ${buttonBorderColor}, 0 8px 16px rgba(0,0,0,0.12)`,
-            transform: buttonPressed ? 'translateY(2px)' : 'translateY(0)',
+            transform: buttonPressed ? `translateY(${2 * FTUE_VISUAL_SCALE}px)` : 'translateY(0)',
           }}
         >
           <span
@@ -135,7 +145,7 @@ export const Ftue4Overlay: React.FC<Ftue4OverlayProps> = ({
             style={{
               color: buttonTextColor,
               fontFamily: 'Inter, sans-serif',
-              fontSize: '1.35rem',
+              fontSize: `${1.35 * FTUE_VISUAL_SCALE}rem`,
             }}
           >
             Lets Harvest!

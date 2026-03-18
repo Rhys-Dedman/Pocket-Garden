@@ -99,6 +99,15 @@
         .coin-bounce {
             animation: coin-bounce 100ms ease-out;
         }
+        /* Coin wallet TEXT bounce on impact: more visible than icon bounce */
+        @keyframes coin-text-bounce {
+            0% { transform: scale(1); }
+            35% { transform: scale(1.22); }
+            100% { transform: scale(1); }
+        }
+        .coin-text-bounce {
+            animation: coin-text-bounce 180ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
         /* Goal bounce: shift down then back, 500ms, fast start slow end */
         @keyframes goal-bounce {
             0% { transform: translateY(0); }

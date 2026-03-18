@@ -250,7 +250,11 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
                 <img key={bounceKey} src={assetPath('/assets/icons/icon_coin.png')} alt="" className={`w-[30px] h-[30px] object-contain object-left outline-none border-0 ${bounceKey > 0 ? 'coin-bounce' : ''}`} style={{ outline: 'none', border: 'none' }} />
               </span>
               {/* Text centered in fixed 85px width */}
-              <span className="relative font-black text-xs tracking-tight text-[#fcf0c7] whitespace-nowrap truncate pl-[12px] pr-2 py-1 max-w-full">
+              <span
+                key={bounceKey}
+                className={`relative font-black text-xs tracking-tight text-[#fcf0c7] whitespace-nowrap truncate pl-[12px] pr-2 py-1 max-w-full ${bounceKey > 0 ? 'coin-text-bounce' : ''}`}
+                style={{ transformOrigin: 'center center' }}
+              >
                 {formatMoney(money)}
               </span>
             </button>
@@ -395,7 +399,11 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
             >
               <img key={bounceKey} src={assetPath('/assets/icons/icon_coin.png')} alt="" className={`w-[30px] h-[30px] object-contain object-left outline-none border-0 ${bounceKey > 0 ? 'coin-bounce' : ''}`} style={{ outline: 'none', border: 'none' }} />
             </span>
-            <span className="relative font-black text-xs tracking-tight text-[#fcf0c7] whitespace-nowrap pl-[20px] pr-3 py-1">
+            <span
+              key={bounceKey}
+              className={`relative font-black text-xs tracking-tight text-[#fcf0c7] whitespace-nowrap pl-[20px] pr-3 py-1 ${bounceKey > 0 ? 'coin-text-bounce' : ''}`}
+              style={{ transformOrigin: 'center center' }}
+            >
               {formatMoney(money)}
             </span>
           </div>

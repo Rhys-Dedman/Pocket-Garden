@@ -480,9 +480,10 @@ export default function App() {
   const [ftue4FadingOut, setFtue4FadingOut] = useState(false);
   /** FTUE_4: true after FTUE 3 completes; start FTUE 4 only when player clicks "Excellent!" on plant 2 discovery */
   const [ftue4Pending, setFtue4Pending] = useState(false);
-  /** FTUE_2: seed button rect for overlay hole + finger + text position */
-  const [seedButtonRect, setSeedButtonRect] = useState<DOMRect | null>(null);
-  const [harvestButtonRect, setHarvestButtonRect] = useState<DOMRect | null>(null);
+  type FtueRect = { left: number; top: number; width: number; height: number };
+  /** FTUE: button rects in game-container coordinates (448×796 space) so overlays scale with the app. */
+  const [seedButtonRect, setSeedButtonRect] = useState<FtueRect | null>(null);
+  const [harvestButtonRect, setHarvestButtonRect] = useState<FtueRect | null>(null);
   /** FTUE: hide player level section until we reveal it (set to true when FTUE 6 shows) */
   const [ftuePlayerLevelVisible, setFtuePlayerLevelVisible] = useState(false);
   /** FTUE 7: after collecting in FTUE 6, schedule spawn of 2 goals then show "more orders" overlay */
@@ -551,7 +552,7 @@ export default function App() {
     ftue11InFlightRef.current = false;
   }, [ftue11StartQueued, panelHeight, ftue10PostClosePending]);
   /** FTUE 10: purchase button rect (measured in App like harvest/seed) so overlay uses same viewport coords */
-  const [ftue10PurchaseButtonRect, setFtue10PurchaseButtonRect] = useState<DOMRect | null>(null);
+  const [ftue10PurchaseButtonRect, setFtue10PurchaseButtonRect] = useState<FtueRect | null>(null);
   const ftue10PurchaseButtonRef = useRef<HTMLButtonElement | null>(null);
   /** FTUE: hide upgrade panel until we reveal it (set to true when ready) */
   const [ftueUpgradePanelVisible, setFtueUpgradePanelVisible] = useState(false);
@@ -689,10 +690,26 @@ export default function App() {
     if (getSeedLevelFromHighestPlant(highestPlantEver) > 1) hasShownSeedProgressionRef.current = true;
   }, [highestPlantEver]);
 
+  const toContainerRect = useCallback((r: DOMRect): FtueRect | null => {
+    const container = containerRef.current;
+    const s = appScaleRef.current || 1;
+    if (!container) return null;
+    const cr = container.getBoundingClientRect();
+    return {
+      left: (r.left - cr.left) / s,
+      top: (r.top - cr.top) / s,
+      width: r.width / s,
+      height: r.height / s,
+    };
+  }, []);
+
   // FTUE_2: keep seed button rect for overlay hole + finger + text position
   const updateSeedButtonRect = useCallback(() => {
-    if (plantButtonRef.current) setSeedButtonRect(plantButtonRef.current.getBoundingClientRect());
-  }, []);
+    const btn = plantButtonRef.current;
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    setSeedButtonRect(toContainerRect(r));
+  }, [toContainerRect]);
   useEffect(() => {
     if (activeFtueStage !== 'seed_tap' && !ftue2FadingOut && activeFtueStage !== 'first_more_orders' && !ftue7FadingOut) return;
     updateSeedButtonRect();
@@ -749,8 +766,11 @@ export default function App() {
 
   // FTUE_5: keep harvest button rect for overlay hole + finger + text
   const updateHarvestButtonRect = useCallback(() => {
-    if (harvestButtonRef.current) setHarvestButtonRect(harvestButtonRef.current.getBoundingClientRect());
-  }, []);
+    const btn = harvestButtonRef.current;
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    setHarvestButtonRect(toContainerRect(r));
+  }, [toContainerRect]);
   useEffect(() => {
     if (activeFtueStage !== 'first_harvest' && activeFtueStage !== 'first_harvest_multi' && activeFtueStage !== 'first_upgrade') return;
     updateHarvestButtonRect();
@@ -764,9 +784,14 @@ export default function App() {
 
   // FTUE_10: measure purchase button in App (same as harvest/seed) so overlay finger uses correct viewport coords
   const updateFtue10PurchaseButtonRect = useCallback(() => {
-    if (ftue10PurchaseButtonRef.current) setFtue10PurchaseButtonRect(ftue10PurchaseButtonRef.current.getBoundingClientRect());
-    else setFtue10PurchaseButtonRect(null);
-  }, []);
+    const btn = ftue10PurchaseButtonRef.current;
+    if (!btn) {
+      setFtue10PurchaseButtonRect(null);
+      return;
+    }
+    const r = btn.getBoundingClientRect();
+    setFtue10PurchaseButtonRect(toContainerRect(r));
+  }, [toContainerRect]);
   useEffect(() => {
     if (ftue10Phase !== 'finger') {
       setFtue10PurchaseButtonRect(null);
@@ -3777,9 +3802,20 @@ export default function App() {
           document.body
         )}
 
-        {/* FTUE overlays: below surplus coin VFX (110) but above farm particles */}
-        {createPortal(
-          <div className="fixed inset-0 pointer-events-none" style={{ zIndex: 100 }}>
+        {/* FTUE overlays: portal to body, but positioned + scaled to match game-container */}
+        {coinPanelPortalRect && createPortal(
+          <div
+            className="fixed pointer-events-none"
+            style={{
+              left: coinPanelPortalRect.left,
+              top: coinPanelPortalRect.top,
+              width: coinPanelPortalRect.width,
+              height: coinPanelPortalRect.height,
+              transform: `scale(${coinPanelPortalRect.scale})`,
+              transformOrigin: 'top left',
+              zIndex: 100,
+            }}
+          >
             {/* FTUE: Welcome (FTUE_1) - only "Lets go!" is clickable */}
             {activeFtueStage === 'welcome' && (
               <FtuePopup
@@ -3797,7 +3833,7 @@ export default function App() {
                 button={{ text: "Lets go!" }}
                 burstWidth={260}
                 burstHeight={320}
-                appScale={appScale}
+                appScale={1}
               />
             )}
             {/* FTUE_2: overlay (hole + finger + text above Seeds button); fade in 1s after FTUE_1, fade out after 2 seeds */}
@@ -3818,6 +3854,7 @@ export default function App() {
               <Ftue3Overlay
                 isActive={activeFtueStage === 'merge_drag'}
                 isFadingOut={ftue3FadingOut}
+                appScale={appScale}
                 onFadeOutComplete={() => {
                   setFtue3FadingOut(false);
                   setFtue4Pending(true);
@@ -3829,6 +3866,7 @@ export default function App() {
               <Ftue4Overlay
                 isActive={activeFtueStage === 'first_goal'}
                 isFadingOut={ftue4FadingOut}
+                appScale={appScale}
                 onLetsHarvest={() => {
                   setGoalBounceSlots((prev) => prev.filter((s) => s !== 0));
                   setFtue4FadingOut(true);
@@ -3862,6 +3900,7 @@ export default function App() {
               <Ftue9Overlay
                 isActive={activeFtueStage === 'first_collect_both'}
                 isFadingOut={ftue9FadingOut}
+                appScale={appScale}
                 onFadeOutComplete={() => {
                   setFtue9FadingOut(false);
                   setFtue9CollectedCount(0);
@@ -3901,6 +3940,7 @@ export default function App() {
                 harvestButtonRect={harvestButtonRect}
                 phase={ftue10Phase}
                 purchaseButtonRect={ftue10PurchaseButtonRect}
+                appScale={appScale}
                 isFadingOut={ftue10FadingOut}
                 onFadeOutComplete={() => {
                   // FTUE 10 complete: close upgrade panel; no bounce changes here.
@@ -3965,11 +4005,11 @@ export default function App() {
             )}
             {/* FTUE_6: goal in coin state – textbox + finger on goal slot 0; only goal tappable; tap to collect and end */}
             {activeFtueStage === 'first_goal_collect' && (
-              <Ftue6Overlay isActive={activeFtueStage === 'first_goal_collect'} />
+              <Ftue6Overlay isActive={activeFtueStage === 'first_goal_collect'} appScale={appScale} />
             )}
             {/* Block all input from FTUE 6 collect until FTUE 7 overlay (finger + textbox) appears */}
             {ftue7Scheduled && (
-              <div className="fixed inset-0 z-[98]" style={{ pointerEvents: 'auto' }} aria-hidden />
+              <div className="absolute inset-0 z-[98]" style={{ pointerEvents: 'auto' }} aria-hidden />
             )}
             {/* FTUE_7: more orders – textbox + finger at seeds; only seeds tappable; 2 taps then fade out */}
             {(activeFtueStage === 'first_more_orders' || ftue7FadingOut) && (
