@@ -381,15 +381,15 @@ export const isCropYieldMaxed = (cropsState: Record<string, UpgradeState>): bool
   return level >= 9; // 1 + 9 = 10 max
 };
 
-/** Order Speed: goal loading time in seconds (15 base - 2 per level, min 0). Max at level 8. */
+/** Order Speed: goal loading time in seconds (10 base - 1 per level, min 0). */
 export const getGoalLoadingSeconds = (harvestState: HarvestState): number => {
   const level = harvestState?.customer_speed?.level ?? 0;
-  return Math.max(0, 15 - 2 * level);
+  return Math.max(0, 10 - 1 * level);
 };
 
 export const isCustomerSpeedMaxed = (harvestState: Record<string, UpgradeState>): boolean => {
   const level = harvestState?.customer_speed?.level ?? 0;
-  return level >= 8; // 15 - 2*8 = 0s
+  return level >= 10; // 10 - 1*10 = 0s
 };
 
 /** Market Value: multiplier for goal completion coins (1.0 + 0.5 per level). Capped at level 5 (3.5x). */

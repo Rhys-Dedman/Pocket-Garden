@@ -2280,8 +2280,10 @@ export default function App() {
         const hoverY = hexTopY - offsetUp;
 
         if (hasGoalForPlant) {
-          allocated[slotIdx] = (allocated[slotIdx] ?? 0) + effectiveCropYield;
-          goalInFlightHarvestBySlotRef.current[slotIdx] = (goalInFlightHarvestBySlotRef.current[slotIdx] ?? 0) + effectiveCropYield;
+          // Fertile soil should yield double crops when harvesting (and stack on top of rewards like double_harvest).
+          const cellCropYield = effectiveCropYield * (cell.fertile ? 2 : 1);
+          allocated[slotIdx] = (allocated[slotIdx] ?? 0) + cellCropYield;
+          goalInFlightHarvestBySlotRef.current[slotIdx] = (goalInFlightHarvestBySlotRef.current[slotIdx] ?? 0) + cellCropYield;
           if ((goalCounts[slotIdx] ?? 0) - (inFlightAtStart[slotIdx] ?? 0) - (allocated[slotIdx] ?? 0) <= 0) {
             goalsPendingCompletionRef.current.add(slotIdx);
           }
@@ -2294,7 +2296,7 @@ export default function App() {
               id: `plant-${cellIdx}-${Date.now()}-${Math.random().toString(36).slice(2)}${idSuffix}`,
               goalSlotIdx: slotIdx,
               iconSrc: getGoalIconForPlantLevel(plantLevel),
-              harvestAmount: effectiveCropYield,
+              harvestAmount: cellCropYield,
               startX,
               startY,
               hoverX,
