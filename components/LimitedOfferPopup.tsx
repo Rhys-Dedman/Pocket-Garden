@@ -339,7 +339,7 @@ export const LimitedOfferPopup: React.FC<LimitedOfferPopupProps> = ({
   return (
     <div 
       className="fixed inset-0 flex items-center justify-center pointer-events-auto"
-      style={{ zIndex: 100, overflow: 'hidden' }}
+      style={{ zIndex: 100, overflow: 'hidden', paddingTop: 'clamp(28px, 5vh, 52px)' }}
     >
 {/* Backdrop - not scaled, covers full screen */}
       <div

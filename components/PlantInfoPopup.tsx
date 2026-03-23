@@ -5,6 +5,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { assetPath } from '../utils/assetPath';
 import { PopupVectorBackground } from './PopupVectorBackground';
+import { PlantWithPot } from './PlantWithPot';
 
 const LEAF_SPRITES = [assetPath('/assets/vfx/particle_leaf_1.png'), assetPath('/assets/vfx/particle_leaf_2.png')];
 
@@ -216,7 +217,7 @@ export const PlantInfoPopup: React.FC<PlantInfoPopupProps> = ({
   return (
     <div 
       className="fixed inset-0 flex items-center justify-center pointer-events-auto"
-      style={{ zIndex: 100, overflow: 'hidden' }}
+      style={{ zIndex: 100, overflow: 'hidden', paddingTop: 'clamp(28px, 5vh, 52px)' }}
       onClick={handleClose}
     >
 {/* Backdrop - not scaled, covers full screen */}
@@ -349,18 +350,18 @@ export const PlantInfoPopup: React.FC<PlantInfoPopupProps> = ({
             className="absolute inset-0 w-full h-full object-contain"
             style={{ filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.25))' }}
           />
-          {/* Plant image inside header */}
-          <img 
-            src={assetPath(`/assets/plants/plant_${isUnlocked ? plantLevel : 0}.png`)}
-            alt="" 
-            className="relative object-contain"
-            style={{ 
+          {/* Plant + pot (shared stack, same center) */}
+          <div
+            className="relative flex items-center justify-center"
+            style={{
               width: '94px',
               height: '94px',
-              filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))',
               marginTop: '-4px',
+              filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))',
             }}
-          />
+          >
+            <PlantWithPot level={isUnlocked ? plantLevel : 0} wrapperClassName="h-full w-full" />
+          </div>
         </div>
 
         {/* Background container */}

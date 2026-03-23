@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom';
 import { BoardCell, Item, DragState } from '../types';
 import { PLANT_CONTAINER_WIDTH, PLANT_CONTAINER_HEIGHT } from '../constants/boardLayout';
 import { assetPath } from '../utils/assetPath';
+import { PlantWithPot } from './PlantWithPot';
 
 /** Set to false to disable swapping plants (drop on non-match just returns to original cell) */
 const ENABLE_SWAP = false;
@@ -53,15 +54,6 @@ interface HexBoardProps {
   onDeletePlant?: (cellIdx: number, x: number, y: number) => void;
   /** FTUE_3: when true, only allow drag from cell 4 to cell 13 (merge). Any other drop returns plant to 4. */
   ftue3OnlyMerge4To13?: boolean;
-}
-
-// Increase when you add more plant_N.png. Merge level N uses plant_N (e.g. two plant_1 → plant_2).
-const MAX_AVAILABLE_PLANT_LEVEL = 14;
-const PLANT_SPRITE_EXT = '.png';
-
-function getPlantSpritePath(level: number): string {
-  const spriteLevel = Math.min(level, MAX_AVAILABLE_PLANT_LEVEL);
-  return assetPath(`/assets/plants/plant_${spriteLevel}${PLANT_SPRITE_EXT}`);
 }
 
 const HEX_SPRITE_EXT = '.png';
@@ -789,6 +781,7 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                   isSwapImpactB ? 'plant-impact-scale-soft' : '',
                   isHarvestBounce ? 'plant-harvest-bounce' : '',
                 ].filter(Boolean).join(' ');
+                const spawnBounceClass = isImpacted && !isDragged ? 'plant-spawn-bounce' : '';
 
                 return (
                   <div
@@ -808,20 +801,16 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                         style={{ transform: innerTransform, transformOrigin: '50% 50%' }}
                         className={`flex items-center justify-center w-full h-full ${innerClass}`}
                       >
-                        <img
-                          src={getPlantSpritePath(level)}
+                        {/* 70% on outer root — same as pre-pot `<img className="w-[70%] h-[70%]">` vs hex inner cell (w-full h-full) */}
+                        <PlantWithPot
+                          level={level}
+                          className="h-[70%] w-[70%] drop-shadow-[0_4px_8px_rgba(0,0,0,0.4)]"
+                          wrapperClassName="h-full w-full"
+                          potClassName={spawnBounceClass}
+                          plantClassName={spawnBounceClass}
                           alt={`Plant ${level}`}
                           draggable={false}
                           onContextMenu={(e) => e.preventDefault()}
-                          className={`w-[70%] h-[70%] object-contain drop-shadow-[0_4px_8px_rgba(0,0,0,0.4)] ${
-                            isImpacted && !isDragged ? 'plant-spawn-bounce' : ''
-                          }`}
-                          style={{
-                            WebkitTouchCallout: 'none',
-                            WebkitUserSelect: 'none',
-                            userSelect: 'none',
-                            pointerEvents: 'none',
-                          }}
                         />
                       </div>
                     </div>
@@ -869,17 +858,12 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                         style={{ transform: `translateY(${liftY}px) scale(${scale})`, transformOrigin: '50% 50%' }}
                         className="flex items-center justify-center w-full h-full"
                       >
-                        <img
-                          src={getPlantSpritePath(item.level)}
+                        <PlantWithPot
+                          level={item.level}
+                          className="h-[70%] w-[70%] drop-shadow-[0_4px_8px_rgba(0,0,0,0.4)]"
+                          wrapperClassName="h-full w-full"
                           alt={`Plant ${item.level}`}
                           draggable={false}
-                          className="w-[70%] h-[70%] object-contain drop-shadow-[0_4px_8px_rgba(0,0,0,0.4)]"
-                          style={{
-                            WebkitTouchCallout: 'none',
-                            WebkitUserSelect: 'none',
-                            userSelect: 'none',
-                            pointerEvents: 'none',
-                          }}
                         />
                       </div>
                     </div>

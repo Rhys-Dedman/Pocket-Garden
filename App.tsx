@@ -20,6 +20,7 @@ import { DiscoveryPopup } from './components/DiscoveryPopup';
 import { PurchaseSuccessfulPopup, type PurchaseSuccessfulRewardRow } from './components/PurchaseSuccessfulPopup';
 import { LevelUpPopup } from './components/LevelUpPopup';
 import { PlantInfoPopup } from './components/PlantInfoPopup';
+import { PlantWithPot } from './components/PlantWithPot';
 import { LimitedOfferPopup } from './components/LimitedOfferPopup';
 import { FakeAdPopup } from './components/FakeAdPopup';
 import { PauseMenuPopup } from './components/PauseMenuPopup';
@@ -405,6 +406,7 @@ const POPUP_ASSETS_TO_PRELOAD = [
   assetPath('/assets/popups/popup_divider.png'),
   assetPath('/assets/vfx/particle_leaf_1.png'),
   assetPath('/assets/vfx/particle_leaf_2.png'),
+  assetPath('/assets/plants/plant_pot.png'),
   ...([1, 2, 3, 4, 5].map((n) => assetPath(`/assets/icons/icons_goals/icon_goal_${n}.png`))),
 ];
 
@@ -549,9 +551,6 @@ export default function App() {
     rewards: PurchaseSuccessfulRewardRow[];
   } | null>(null);
   const pendingPurchaseBoostsRef = useRef<{ offerId: string; durationMs: number; icon: string }[]>([]);
-  // Seed progression popup - shown first time seed level increases (in front of discovery)
-  const [seedProgressionPopup, setSeedProgressionPopup] = useState<boolean>(false);
-  const hasShownSeedProgressionRef = useRef(false);
   // Plant info popup state (for barn)
   const [plantInfoPopup, setPlantInfoPopup] = useState<{ isVisible: boolean; level: number } | null>(null);
   // Limited offer popup state
@@ -973,10 +972,6 @@ export default function App() {
   }, [goalSlots]);
 
   useEffect(() => { highestPlantEverRef.current = highestPlantEver; }, [highestPlantEver]);
-  // If we've already passed first seed level increase (e.g. from save), don't show seed progression popup
-  useEffect(() => {
-    if (getSeedLevelFromHighestPlant(highestPlantEver) > 1) hasShownSeedProgressionRef.current = true;
-  }, [highestPlantEver]);
 
   const toContainerRect = useCallback((r: DOMRect): FtueRect | null => {
     const container = containerRef.current;
@@ -1251,13 +1246,12 @@ export default function App() {
       if (levelUpPopup?.isVisible) return;
       if (discoveryPopup?.isVisible) return;
       if (purchaseSuccessfulUi) return;
-      if (seedProgressionPopup) return;
       if (plantInfoPopup?.isVisible) return;
       const now = Date.now();
       // Don't show another popup for 10s after user just closed one
       if (lastLimitedOfferClosedAtRef.current && (now - lastLimitedOfferClosedAtRef.current) < 10000) return;
       if (lastFakeAdClosedAtRef.current && (now - lastFakeAdClosedAtRef.current) < 10000) return;
-      // Wait 7.5s after user closed level up / discovery / seed progression / plant info before showing limited offer
+      // Wait 7.5s after user closed level up / discovery / plant info before showing limited offer
       if (lastOtherPopupClosedAtRef.current && (now - lastOtherPopupClosedAtRef.current) < 7500) return;
       const elapsed = now - lastLimitedOfferShownAtRef.current;
       if (elapsed < 90000) return; // Rule 1: 90s cooldown
@@ -1314,7 +1308,7 @@ export default function App() {
       }
     }, 2000);
     return () => clearInterval(interval);
-  }, [playerLevel, grid, money, limitedOfferPopup?.isVisible, goalSlots, harvestState, highestPlantEver, levelUpPopup?.isVisible, discoveryPopup?.isVisible, purchaseSuccessfulUi, seedProgressionPopup, plantInfoPopup?.isVisible, offlineEarningsUi?.open, activeScreen]);
+  }, [playerLevel, grid, money, limitedOfferPopup?.isVisible, goalSlots, harvestState, highestPlantEver, levelUpPopup?.isVisible, discoveryPopup?.isVisible, purchaseSuccessfulUi, plantInfoPopup?.isVisible, offlineEarningsUi?.open, activeScreen]);
 
   // Derive which tabs have offers (for tab notification coloring)
   const tabsWithOffers = new Set(rewardedOffers.map(o => o.tab));
@@ -2945,13 +2939,6 @@ export default function App() {
     // Update highest plant ever if we created a new record and show discovery popup.
     // Use ref (not state) so we always reset the discovery counter even if state is stale/batched.
     if (newLevel != null && newLevel > highestPlantEverRef.current) {
-      const prevSeedLevel = getSeedLevelFromHighestPlant(highestPlantEver);
-      const newSeedLevel = getSeedLevelFromHighestPlant(newLevel);
-      const isFirstSeedLevelIncrease = newSeedLevel > prevSeedLevel && !hasShownSeedProgressionRef.current;
-      if (isFirstSeedLevelIncrease) {
-        hasShownSeedProgressionRef.current = true;
-        setSeedProgressionPopup(true);
-      }
       setHighestPlantEver(newLevel);
       highestPlantEverRef.current = newLevel; // Sync ref so next goal spawn sees new level immediately
       newGoalsSinceDiscoveryRef.current = 0; // ONLY reset here: "discovering a plant" = merge to new highest. Counter for next discovery goal starts now.
@@ -3131,7 +3118,6 @@ export default function App() {
     setFtue11StartQueued(save.ftue11StartQueued);
     setFtueUpgradePanelVisible(save.ftueUpgradePanelVisible);
     setFtuePlayerLevelVisible(save.ftuePlayerLevelVisible);
-    if (save.hasShownSeedProgression) hasShownSeedProgressionRef.current = true;
     const now = Date.now();
     setActiveBoosts(normalizeActiveBoostsAfterLoad(save.activeBoosts.filter((b) => b.endTime > now)));
     setPendingUnlockUpgradeId(save.pendingUnlockUpgradeId);
@@ -3361,7 +3347,6 @@ export default function App() {
       ftue11StartQueued,
       ftueUpgradePanelVisible,
       ftuePlayerLevelVisible,
-      hasShownSeedProgression: hasShownSeedProgressionRef.current,
       activeBoosts,
       pendingUnlockUpgradeId,
       levelUpPopupQueue,
@@ -3968,6 +3953,7 @@ export default function App() {
 <SideAction
                         label="Plant"
                         icon={assetPath(`/assets/plants/plant_${seedLevel}.png`)}
+                        iconNode={<PlantWithPot level={seedLevel} wrapperClassName="h-full w-full" />}
                         iconScale={1.35}
                         iconOffsetY={-1}
                         progress={seedsFreeMode ? 0 : Math.max(0, Math.min(1, seedProgress / 100))}
@@ -4428,20 +4414,34 @@ export default function App() {
                               const plantLevel = startPlant + plantOffset;
                               const isUnlocked = plantLevel <= highestPlantEver;
                               return (
-                                <img
+                                <div
                                   key={plantOffset}
-                                  src={assetPath(`/assets/plants/plant_${isUnlocked ? plantLevel : 0}.png`)}
-                                  alt={`Plant ${plantLevel}`}
-                                  className={`object-contain ${isUnlocked ? 'cursor-pointer pointer-events-auto active:scale-95' : 'pointer-events-none'}`}
-                                  style={{
-                                    width: '95px',
-                                    height: '95px',
-                                  }}
-                                  onClick={isUnlocked ? (e) => {
-                                    e.stopPropagation();
-                                    setPlantInfoPopup({ isVisible: true, level: plantLevel });
-                                  } : undefined}
-                                />
+                                  role={isUnlocked ? 'button' : undefined}
+                                  tabIndex={isUnlocked ? 0 : undefined}
+                                  className={`relative flex items-center justify-center ${isUnlocked ? 'cursor-pointer pointer-events-auto active:scale-95' : 'pointer-events-none'}`}
+                                  style={{ width: '95px', height: '95px' }}
+                                  onClick={
+                                    isUnlocked
+                                      ? (e) => {
+                                          e.stopPropagation();
+                                          setPlantInfoPopup({ isVisible: true, level: plantLevel });
+                                        }
+                                      : undefined
+                                  }
+                                  onKeyDown={
+                                    isUnlocked
+                                      ? (e) => {
+                                          if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            setPlantInfoPopup({ isVisible: true, level: plantLevel });
+                                          }
+                                        }
+                                      : undefined
+                                  }
+                                >
+                                  <PlantWithPot level={isUnlocked ? plantLevel : 0} wrapperClassName="h-full w-full" />
+                                </div>
                               );
                             })}
                           </div>
@@ -4948,24 +4948,6 @@ export default function App() {
                   });
                 }}
               />
-            )}
-
-            {/* Seed Progression Popup - shown first time seed level increases, in front of discovery (blue theme) */}
-            {seedProgressionPopup && (
-              <div className="absolute inset-0" style={{ zIndex: 110 }}>
-                <LevelUpPopup
-                  isVisible={seedProgressionPopup}
-                  onClose={() => { lastOtherPopupClosedAtRef.current = Date.now(); setSeedProgressionPopup(false); }}
-                  title="Seeds Evolve!"
-                  description="Discovering more plants will increase the level of seeds you generate"
-                  icon={assetPath('/assets/icons/icon_seedquality.png')}
-                  subtitle="New Feature"
-                  buttonText="Got it!"
-                  iconScale={0.8}
-                  hideLevel={true}
-                  appScale={appScale}
-                />
-              </div>
             )}
 
             {/* Plant Info Popup (Barn) */}

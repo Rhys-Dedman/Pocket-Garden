@@ -10,6 +10,7 @@ import type {
   UpgradeState,
 } from '../components/UpgradeList';
 import type { ActiveBoostData } from '../components/ActiveBoostIndicator';
+import { STORE_STARTER_PACK_COUNTDOWN_END_MS_KEY } from '../offers';
 
 export const GAME_SAVE_STORAGE_KEY = 'pocket-garden-save-v1';
 
@@ -74,7 +75,6 @@ export interface GameSaveV1 {
   ftue11StartQueued: boolean;
   ftueUpgradePanelVisible: boolean;
   ftuePlayerLevelVisible: boolean;
-  hasShownSeedProgression: boolean;
   activeBoosts: ActiveBoostData[];
   pendingUnlockUpgradeId: string | null;
   levelUpPopupQueue: number[];
@@ -114,6 +114,11 @@ export function clearGameSave(): void {
   if (typeof localStorage === 'undefined') return;
   try {
     localStorage.removeItem(GAME_SAVE_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+  try {
+    localStorage.removeItem(STORE_STARTER_PACK_COUNTDOWN_END_MS_KEY);
   } catch {
     /* ignore */
   }

@@ -379,6 +379,9 @@ export function getStorePurchaseBoostGrants(config: StoreCoinOfferConfig): { off
   return [{ offerId: config.boostOfferId, durationMs: config.durationMs, icon: config.headerIcon }];
 }
 
+/** localStorage end timestamp for starter-pack 24h UI; removed in `clearGameSave` so reset / fresh FTUE restarts the timer */
+export const STORE_STARTER_PACK_COUNTDOWN_END_MS_KEY = 'store_bundle_starter_pack_countdown_end_ms';
+
 export const STORE_BUNDLE_OFFERS: StoreBundleOfferConfig[] = [
   {
     ...STORE_COIN_OFFERS[0],
@@ -409,7 +412,7 @@ export const STORE_BUNDLE_OFFERS: StoreBundleOfferConfig[] = [
     ],
     priceLabel: '$9.99',
     valueCalloutText: 'Limited Offer',
-    limitedOfferCountdownStorageKey: 'store_bundle_starter_pack_countdown_end_ms',
+    limitedOfferCountdownStorageKey: STORE_STARTER_PACK_COUNTDOWN_END_MS_KEY,
     limitedOfferCountdownDurationMs: 24 * 60 * 60 * 1000,
   },
   {

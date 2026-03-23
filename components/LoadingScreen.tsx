@@ -13,8 +13,9 @@ const DESIGN_WIDTH = 448;
 const DESIGN_HEIGHT = 796;
 
 const ASSETS_TO_PRELOAD = [
-  // Plants (discovery + grid)
+  // Plants (discovery + grid) + shared pot under every plant
   ...Array.from({ length: 25 }, (_, i) => `/assets/plants/plant_${i}.png`),
+  '/assets/plants/plant_pot.png',
   // Goal icons (orders/discovery goals – preload all so new goals don’t load images on demand)
   ...Array.from({ length: 24 }, (_, i) => `/assets/icons/icons_goals/icon_goal_${i + 1}.png`),
   // Icons

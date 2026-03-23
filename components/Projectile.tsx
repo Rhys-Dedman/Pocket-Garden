@@ -1,6 +1,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { ProjectileData } from '../App';
+import { assetPath } from '../utils/assetPath';
 
 interface ProjectileProps {
   data: ProjectileData;
@@ -255,7 +256,12 @@ export const Projectile: React.FC<ProjectileProps> = ({ data, onImpact, onComple
                 background: '#fdf9e9'
               }}
             >
-              <span className="text-[12px] select-none filter drop-shadow-sm">🌱</span>
+              <img
+                src={assetPath('/assets/icons/emoji_seed.png')}
+                alt=""
+                draggable={false}
+                className="pointer-events-none select-none w-[12px] h-[12px] object-contain filter saturate-[0.8] drop-shadow-sm"
+              />
             </div>
           </div>
         </>

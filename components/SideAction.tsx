@@ -8,7 +8,10 @@ interface TapRipple {
 
 interface SideActionProps {
   label: string;
+  /** Image URL, path, or emoji — ignored when `iconNode` is set */
   icon: string;
+  /** When set, rendered instead of `icon` (e.g. plant + pot stack) */
+  iconNode?: React.ReactNode;
   progress: number;
   color: string;
   isActive?: boolean;
@@ -33,7 +36,8 @@ interface SideActionProps {
 
 export const SideAction: React.FC<SideActionProps> = ({ 
   label, 
-  icon, 
+  icon,
+  iconNode,
   progress, 
   color, 
   isActive, 
@@ -121,7 +125,7 @@ export const SideAction: React.FC<SideActionProps> = ({
   const whiteHeadStrokeDashoffset = circumference - (whiteHeadProgress * circumference);
   const whiteStrokeDashoffset = whiteCircumference - (displayProgress * whiteCircumference);
 
-  const isImageIcon = icon.startsWith('http') || icon.startsWith('/');
+  const isImageIcon = !iconNode && (icon.startsWith('http') || icon.startsWith('/'));
 
   // Tap ripple state - stores active ripples that expand outward on each tap
   const [tapRipples, setTapRipples] = useState<TapRipple[]>([]);
@@ -360,7 +364,18 @@ export const SideAction: React.FC<SideActionProps> = ({
                 : 'scale-100'
           }`}
         >
-          {isImageIcon ? (
+          {iconNode ? (
+            <div
+              className="flex items-center justify-center drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)]"
+              style={{
+                width: 40 * iconScale,
+                height: 40 * iconScale,
+                transform: iconOffsetY ? `translateY(${iconOffsetY}px)` : undefined,
+              }}
+            >
+              {iconNode}
+            </div>
+          ) : isImageIcon ? (
             <img 
               src={icon} 
               alt={label} 

@@ -6,6 +6,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { assetPath } from '../utils/assetPath';
 import { PopupVectorBackground } from './PopupVectorBackground';
+import { PlantWithPot } from './PlantWithPot';
 import {
   REWARD_OFFER_LINE_TEXT_COLOR,
   REWARD_PILL_FILL_COLOR,
@@ -322,7 +323,7 @@ export const DiscoveryPopup: React.FC<DiscoveryPopupProps> = ({
   return (
     <div 
       className="fixed inset-0 flex items-center justify-center pointer-events-auto"
-      style={{ zIndex: 100, overflow: 'hidden' }}
+      style={{ zIndex: 100, overflow: 'hidden', paddingTop: 'clamp(28px, 5vh, 52px)' }}
     >
 {/* Backdrop - not scaled, covers full screen */}
       <div
@@ -453,18 +454,35 @@ export const DiscoveryPopup: React.FC<DiscoveryPopupProps> = ({
             className="absolute inset-0 w-full h-full object-contain"
             style={{ filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.25))' }}
           />
-          {/* Plant image inside header */}
-          <img 
-            src={imageSrc} 
-            alt="" 
-            className="relative object-contain"
-            style={{ 
-              width: '94px',  /* 85px * 1.1 = ~94px (10% larger) */
-              height: '94px',
-              filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))',
-              marginTop: '-4px',
-            }}
-          />
+          {/* Plant discovery art: pot + plant when level known; else legacy single image */}
+          {imageLevel != null ? (
+            <div
+              className="relative flex items-center justify-center"
+              style={{
+                width: '94px',
+                height: '94px',
+                marginTop: '-4px',
+                filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))',
+              }}
+            >
+              <PlantWithPot
+                level={Math.max(1, Math.min(24, imageLevel))}
+                wrapperClassName="h-full w-full"
+              />
+            </div>
+          ) : (
+            <img
+              src={imageSrc}
+              alt=""
+              className="relative object-contain"
+              style={{
+                width: '94px',
+                height: '94px',
+                filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))',
+                marginTop: '-4px',
+              }}
+            />
+          )}
         </div>
 
         {/* Background container - uses transform scale trick for sharper rendering */}
