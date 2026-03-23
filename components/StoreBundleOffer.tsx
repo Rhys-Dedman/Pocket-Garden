@@ -31,6 +31,9 @@ import {
 
 const CARD_WIDTH_PX = 440;
 
+/** Fixed slot above the purchase button so removing the countdown does not shift `valueCalloutText` (e.g. “Limited Offer”). Matches `text-[15px]` + `leading-none` row. */
+const STORE_BUNDLE_COUNTDOWN_ROW_MIN_HEIGHT_PX = 15;
+
 /** Cream label (same as blue-pill era); background left transparent. */
 const STORE_BUNDLE_VALUE_CALLOUT_COLOR = '#fcf0c7';
 
@@ -307,21 +310,28 @@ export const StoreBundleOffer: React.FC<StoreBundleOfferProps> = ({ config, onPu
             ) : null}
             {/* Column width = button width; strikethrough centered same as price inside button */}
             <div className="inline-flex flex-col items-stretch gap-[4px]">
-              {showLimitedCountdown ? (
-                <span
-                  className="pointer-events-none text-center text-[15px] font-black tracking-tight leading-none"
-                  style={{ color: REWARD_DURATION_TEXT_COLOR }}
-                >
-                  {formatBundleLimitedCountdown(bundleCountdownRemainingMs)}
-                </span>
-              ) : originalPriceLabel ? (
-                <span
-                  className="pointer-events-none text-center text-[15px] font-black tracking-tight leading-none line-through"
-                  style={{ color: REWARD_DURATION_TEXT_COLOR }}
-                >
-                  {originalPriceLabel}
-                </span>
-              ) : null}
+              {/* Always reserve one line so countdown unmount does not shrink the column and move the callout above */}
+              <div
+                className="pointer-events-none flex shrink-0 items-center justify-center self-stretch text-center"
+                style={{ minHeight: STORE_BUNDLE_COUNTDOWN_ROW_MIN_HEIGHT_PX }}
+                aria-hidden={!showLimitedCountdown && !originalPriceLabel}
+              >
+                {showLimitedCountdown ? (
+                  <span
+                    className="text-[15px] font-black tracking-tight leading-none"
+                    style={{ color: REWARD_DURATION_TEXT_COLOR }}
+                  >
+                    {formatBundleLimitedCountdown(bundleCountdownRemainingMs)}
+                  </span>
+                ) : originalPriceLabel ? (
+                  <span
+                    className="text-[15px] font-black tracking-tight leading-none line-through"
+                    style={{ color: REWARD_DURATION_TEXT_COLOR }}
+                  >
+                    {originalPriceLabel}
+                  </span>
+                ) : null}
+              </div>
               <button
                 type="button"
                 className="pointer-events-auto flex items-center justify-center px-[8px] rounded-[9px] transition-all border outline outline-1"
