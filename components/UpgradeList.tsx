@@ -11,9 +11,9 @@ export interface UpgradeState {
 
 export type SeedsState = Record<string, UpgradeState>;
 
-/** Seed level from highest plant discovered: 1 + floor((highestPlant - 1) / 3). Every 3 plants = +1 seed level. */
+/** Seed level from highest plant discovered: 1 + floor((highestPlant - 1) / 4). Every 4 plants = +1 seed level. */
 export const getSeedLevelFromHighestPlant = (highestPlant: number): number => {
-  return 1 + Math.floor((Math.max(1, highestPlant) - 1) / 3);
+  return 1 + Math.floor((Math.max(1, highestPlant) - 1) / 4);
 };
 
 /** Get the bonus seed chance percentage (0-50%, 5% per level, max level 10) */
