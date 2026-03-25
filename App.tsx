@@ -81,10 +81,11 @@ import {
   getPlantMasteryUnlockCost,
 } from './constants/plantMastery';
 import { formatCompactNumber } from './utils/formatCompactNumber';
+import { getPlantCoinValue } from './utils/plantValue';
 
-/** Coin per plant level: level 1 = 5, level 2 = 10, level 3 = 20, ... */
+/** Coin per plant level (economy). */
 export function getCoinValueForLevel(level: number): number {
-  return 5 * Math.pow(2, level - 1);
+  return getPlantCoinValue(level);
 }
 
 /** Max plant goal slots: 3 until level 4, then 4. Slot 4 (5th) is reserved for coin goal only. */
@@ -353,7 +354,7 @@ const getGoalCropRequired = (
   cropYieldLevel: number,
   goalDifficultyScaling: number = GOAL_DIFFICULTY_SCALING
 ): number => {
-  const baseGoal = 3 + Math.floor(playerLevel / 3) + Math.floor(cropYieldLevel * 0.5);
+  const baseGoal = 3 + Math.floor(playerLevel / 1) + Math.floor(cropYieldLevel * 0.5);
   const variationRange = 1 + Math.floor(playerLevel / 10);
   const randomOffset = Math.floor(Math.random() * (2 * variationRange + 1)) - variationRange;
   const variedGoal = baseGoal + randomOffset;
@@ -1745,7 +1746,7 @@ export default function App() {
     return percent;
   };
 
-  // Seed Production upgrade: auto-increase progress when level >= 1. Rate = level completions per minute (+1/min per upgrade).
+  // Seed Production upgrade: auto-increase progress. Visual: 10%..100% (+10% per level). Rate: 3/min..10/min (linear).
   const seedProductionLevel = seedsState?.seed_production?.level ?? 0;
   const lastSeedProgressTimeRef = useRef<number>(0);
   const seedProgressRef = useRef<number>(0);
@@ -1792,9 +1793,9 @@ export default function App() {
     // Don't start progress until loading is complete
     if (isLoading) return;
     
-    // Rapid Seeds boost: 15/min; otherwise 3/min base +1 per upgrade, max 10/min
+    // Rapid Seeds boost: 15/min; otherwise 3/min..10/min linear across 9 upgrades (level 0..9)
     const hasRapidSeedsBoost = activeBoosts.some(b => b.offerId === 'rapid_seeds');
-    const perMinute = hasRapidSeedsBoost ? 15 : Math.min(10, 3 + seedProductionLevel);
+    const perMinute = hasRapidSeedsBoost ? 15 : (3 + (7 * Math.min(9, Math.max(0, seedProductionLevel))) / 9);
     lastSeedProgressTimeRef.current = Date.now();
     let rafId: number;
     const percentPerMs = (perMinute * 100) / (60 * 1000); // % progress per millisecond
@@ -1836,7 +1837,7 @@ export default function App() {
     return () => cancelAnimationFrame(rafId);
   }, [seedProductionLevel, isLoading, activeBoosts, activeFtueStage]);
 
-  // Goal loading countdown: Order Speed (10s base - 1s per level, min 0). Rush Orders boost = 0s. Don't start until slot is 100% faded in.
+  // Goal loading countdown: Order Speed (15s base - 1s per level, min 5). Rush Orders boost = 0s. Don't start until slot is 100% faded in.
   const goalIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
     if (isLoading) return;
@@ -1993,7 +1994,7 @@ export default function App() {
         const amountRequired = getGoalCropRequired(playerLevel, cropYieldLevel);
         const plantValue = getCoinValueForLevel(highestPlantEver);
         const marketMultiplier = getMarketValueMultiplier(harvestState);
-        const rawValue = plantValue * amountRequired * 1.5 * marketMultiplier * 1.0;
+        const rawValue = plantValue * amountRequired * marketMultiplier * 1.0;
         const roundedValue = Math.round(rawValue / 5) * 5;
         setCoinGoalValue(roundedValue);
         setCoinGoalTimeRemaining(30);
@@ -2202,7 +2203,7 @@ export default function App() {
   useEffect(() => {
     if (isLoading) return;
     const hasRapidHarvestBoost = activeBoosts.some(b => b.offerId === 'rapid_harvest');
-    const perMinute = hasRapidHarvestBoost ? 15 : Math.min(10, 3 + harvestSpeedLevel);
+    const perMinute = hasRapidHarvestBoost ? 15 : (3 + (7 * Math.min(9, Math.max(0, harvestSpeedLevel))) / 9);
     lastHarvestProgressTimeRef.current = Date.now();
     let rafId: number;
     const percentPerMs = (perMinute * 100) / (60 * 1000);
@@ -5890,7 +5891,7 @@ export default function App() {
                     const plantValue = getCoinValueForLevel(plantLevel);
                     const amountRequired = goalAmountsRequired[goalSlotIdx] ?? 3;
                     const marketMultiplier = getMarketValueMultiplier(harvestState);
-                    const rawValue = plantValue * amountRequired * 1.5 * marketMultiplier;
+                    const rawValue = plantValue * amountRequired * marketMultiplier;
                     const roundedValue = Math.round(rawValue / 5) * 5;
                     setGoalCompletedValues((v) => {
                       const vNext = [...v];

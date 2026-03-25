@@ -110,14 +110,14 @@ export function simulateOfflineSeedHarvest(input: OfflineSimInput): OfflineSimRe
   const getSeedRatePerMs = (wallTime: number) => {
     if (seedFrozen) return 0;
     const hasRapid = input.activeBoosts.some((b) => b.offerId === 'rapid_seeds' && b.endTime > wallTime);
-    const perMin = hasRapid ? 15 : Math.min(10, 3 + seedProdLevel);
+    const perMin = hasRapid ? 15 : (3 + (7 * Math.min(9, Math.max(0, seedProdLevel))) / 9);
     return (perMin * 100) / (60 * 1000);
   };
 
   const getHarvestRatePerMs = (wallTime: number) => {
     if (harvestFrozen) return 0;
     const hasRapid = input.activeBoosts.some((b) => b.offerId === 'rapid_harvest' && b.endTime > wallTime);
-    const perMin = hasRapid ? 15 : Math.min(10, 3 + harvestSpeedLevel);
+    const perMin = hasRapid ? 15 : (3 + (7 * Math.min(9, Math.max(0, harvestSpeedLevel))) / 9);
     return (perMin * 100) / (60 * 1000);
   };
 
