@@ -74,6 +74,10 @@ export interface FtuePopupProps {
   onClose: () => void;
   /** When true, backdrop and rest of screen are not clickable; only the primary button works */
   blockBackdropClick?: boolean;
+  /** Where to position the popup card within the overlay. */
+  position?: 'center' | 'top';
+  /** Used when position="top". */
+  topOffsetPx?: number;
   /** Header: show circle with icon (e.g. happy customer) */
   header?: { icon: string };
   /** Popup title (e.g. "Welcome Gardener!") */
@@ -106,6 +110,8 @@ export const FtuePopup: React.FC<FtuePopupProps> = ({
   isVisible,
   onClose,
   blockBackdropClick = true,
+  position = 'center',
+  topOffsetPx = 80,
   header,
   title,
   showDivider = false,
@@ -227,9 +233,11 @@ export const FtuePopup: React.FC<FtuePopupProps> = ({
   const isEntering = animState === 'entering';
   const isLeaving = animState === 'leaving';
 
+  const alignClass = position === 'top' ? 'items-start' : 'items-center';
+
   return (
     <div
-      className="absolute inset-0 flex items-center justify-center pointer-events-auto"
+      className={`absolute inset-0 flex ${alignClass} justify-center pointer-events-auto`}
       style={{ zIndex: 100, overflow: 'hidden' }}
     >
       <div
@@ -247,7 +255,11 @@ export const FtuePopup: React.FC<FtuePopupProps> = ({
 
       <div
         className="relative flex items-center justify-center"
-        style={{ transform: `scale(${appScale})`, transformOrigin: 'center center' }}
+        style={{
+          transform: `scale(${appScale})`,
+          transformOrigin: 'center center',
+          ...(position === 'top' ? { marginTop: `${topOffsetPx}px` } : {}),
+        }}
       >
         {/* Leaf burst - sized to popup */}
         {(isEntering || animState === 'visible') && leaves.length > 0 && (

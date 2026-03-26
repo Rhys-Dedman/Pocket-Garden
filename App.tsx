@@ -925,6 +925,10 @@ export default function App() {
   const [levelUpPopupQueue, setLevelUpPopupQueue] = useState<number[]>([]);
   /** FTUE: current stage (e.g. 'welcome' after splash); null when not in FTUE */
   const [activeFtueStage, setActiveFtueStage] = useState<FtueStageId | null>(null);
+  /** Warning FTUE: shown when unlocked grid is full and all plants are unique. */
+  const [outOfSpaceFtueVisible, setOutOfSpaceFtueVisible] = useState(false);
+  /** Gate so dismissing doesn't instantly re-open until condition clears then re-enters. */
+  const outOfSpaceArmedRef = useRef(true);
   /** FTUE_2: number of seeds fired (must be exactly 2 to complete); block 3rd tap */
   const [ftue2SeedFireCount, setFtue2SeedFireCount] = useState(0);
   /** FTUE_2: true when fading out finger + text after 2 seeds */
@@ -1736,6 +1740,34 @@ export default function App() {
   
   // Grid is "full" when all unlocked cells have items OR have incoming projectiles
   const isGridFull = grid.every((cell, idx) => cell.locked || cell.item !== null || reservedCellsSet.has(idx));
+
+  // Out-of-space condition: every unlocked cell is filled AND every plant level is unique.
+  const isOutOfSpaceUniqueFill = (() => {
+    const unlocked = grid.filter((c) => !c.locked);
+    if (unlocked.length === 0) return false;
+    const seen = new Set<number>();
+    for (const c of unlocked) {
+      const lvl = c.item?.level;
+      if (lvl == null) return false;
+      if (seen.has(lvl)) return false;
+      seen.add(lvl);
+    }
+    return true;
+  })();
+
+  useEffect(() => {
+    // If the FTUE overlay system isn't mounted yet, don't attempt to show.
+    if (!coinPanelPortalRect) return;
+    if (!isOutOfSpaceUniqueFill) {
+      outOfSpaceArmedRef.current = true;
+      setOutOfSpaceFtueVisible(false);
+      return;
+    }
+    if (outOfSpaceArmedRef.current) {
+      outOfSpaceArmedRef.current = false;
+      setOutOfSpaceFtueVisible(true);
+    }
+  }, [isOutOfSpaceUniqueFill, coinPanelPortalRect]);
 
   const spawnProjectile = useCallback((targetIdx: number, plantLevel: number, isSpecialDelivery?: boolean) => {
     if (plantButtonRef.current && containerRef.current) {
@@ -5118,6 +5150,22 @@ export default function App() {
                 appScale={1}
               />
             )}
+
+            {/* Warning: Out of Space — blocks input; re-shows whenever grid becomes full+unique again */}
+            <FtuePopup
+              isVisible={outOfSpaceFtueVisible}
+              onClose={() => setOutOfSpaceFtueVisible(false)}
+              blockBackdropClick={true}
+              position="top"
+              topOffsetPx={120}
+              title="Out of Space"
+              showDivider={true}
+              description="You can remove plants by dragging them off the garden board"
+              button={{ text: 'Thanks!' }}
+              burstWidth={260}
+              burstHeight={320}
+              appScale={1}
+            />
             {/* FTUE_2: overlay (hole + finger + text above Seeds button); fade in 1s after FTUE_1, fade out after 2 seeds */}
             {(activeFtueStage === 'seed_tap' || ftue2FadingOut) && (
               <Ftue2Overlay
