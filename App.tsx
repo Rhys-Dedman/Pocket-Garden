@@ -130,18 +130,39 @@ function buildPurchaseSuccessRewards(config: StoreCoinOfferConfig): PurchaseSucc
 }
 
 /** Build limited offer popup state from offer id (uses offers.ts config). */
-function buildLimitedOfferPopupState(offerId: string, overrides?: { activeBoostEndTime?: number; highestPlantEver?: number }): { isVisible: boolean; title: string; imageSrc: string; subtitle: string; description: string; buttonText: string; offerId: string; tab: TabType; durationMinutes: number | null; durationSeconds?: number | null; activeBoostEndTime?: number; subtitleSettingsStyle?: boolean; hideOfferDurationBlock?: boolean } | null {
+function buildLimitedOfferPopupState(
+  offerId: string,
+  overrides?: { activeBoostEndTime?: number; highestPlantEver?: number }
+): {
+  isVisible: boolean;
+  title: string;
+  imageSrc: string;
+  subtitle: string;
+  description: string;
+  buttonText: string;
+  offerId: string;
+  tab: TabType;
+  durationMinutes: number | null;
+  durationSeconds?: number | null;
+  activeBoostEndTime?: number;
+  subtitleSettingsStyle?: boolean;
+  hideOfferDurationBlock?: boolean;
+  imageLevel?: number;
+} | null {
   const resolvedOfferId = isLegacyCoinMultiplierOfferId(offerId) ? DOUBLE_COINS_OFFER_ID : offerId;
   const offer = getOfferById(resolvedOfferId);
   if (!offer) return null;
-  const imageSrc = offer.id === 'special_delivery' && overrides?.highestPlantEver != null
-    ? assetPath(`/assets/plants/plant_${Math.max(1, Math.min(24, overrides.highestPlantEver - 1))}.png`)
-    : assetPath(offer.headerIcon);
+  const specialDeliveryLevel =
+    offer.id === 'special_delivery' && overrides?.highestPlantEver != null
+      ? Math.max(1, Math.min(24, overrides.highestPlantEver - 1))
+      : null;
+  const imageSrc = assetPath(offer.headerIcon);
   const isCoinMult = isCoinMultiplierBoostId(resolvedOfferId);
   return {
     isVisible: true,
     title: 'Limited Offer',
     imageSrc,
+    ...(specialDeliveryLevel != null ? { imageLevel: specialDeliveryLevel } : {}),
     subtitle: isCoinMult ? 'Double Coins' : offer.title,
     description: offer.description,
     buttonText: 'Accept Offer',
@@ -441,9 +462,11 @@ const PLANT_DATA: Record<number, { name: string; description: string }> = {
   4: { name: 'Rosette Succulent', description: 'A neat spiral of sturdy leaves best admired from a respectful distance.' },
   5: { name: 'Little Daisy', description: 'A simple little flower with an open face that\'s always happy to be included.' },
   6: { name: 'Spring Daffodil', description: 'Shows up early every year and behaves like it deserves the credit.' },
-  7: { name: 'Pink Tulip', description: 'A tidy upright bloom that looks like it prefers things done properly.' },
-  8: { name: 'Chrysanthemum', description: 'An impressive number of petals with no clear signs of stopping.' },
-  9: { name: 'Fresh Lavender', description: 'Soft little flowers with a gentle scent that quietly spreads whether invited or not.' },
+  // Swap text only between levels 7–9 (sprites/icons unchanged):
+  // 7 ← 9, 8 ← 7, 9 ← 8
+  7: { name: 'Fresh Lavender', description: 'Soft little flowers with a gentle scent that quietly spreads whether invited or not.' },
+  8: { name: 'Pink Tulip', description: 'A tidy upright bloom that looks like it prefers things done properly.' },
+  9: { name: 'Chrysanthemum', description: 'An impressive number of petals with no clear signs of stopping.' },
   10: { name: 'Thorny Rose', description: 'A beautiful bloom that encourages admiration at a sensible distance.' },
   11: { name: 'Cherry Blossom', description: 'Delicate petals that look ready to drift away the moment you get attached.' },
   12: { name: 'Blooming Iris', description: 'Wide elegant petals arranged like they know they turned out well.' },
@@ -582,6 +605,7 @@ export default function App() {
     activeBoostEndTime?: number;
     subtitleSettingsStyle?: boolean;
     hideOfferDurationBlock?: boolean;
+    imageLevel?: number;
   } | null>(null);
   const lastLimitedOfferShownAtRef = useRef<number>(0);
   const lastShownOfferIdRef = useRef<string | null>(null);
@@ -763,6 +787,7 @@ export default function App() {
   const [activeCoinPanels, setActiveCoinPanels] = useState<CoinPanelData[]>([]);
   const [coinPanelPortalRect, setCoinPanelPortalRect] = useState<{ left: number; top: number; width: number; height: number; scale: number } | null>(null);
   const [harvestBounceCellIndices, setHarvestBounceCellIndices] = useState<number[]>([]);
+  const [maxPlantToasts, setMaxPlantToasts] = useState<{ id: string; x: number; y: number; startTime: number }[]>([]);
   const [walletFlashActive, setWalletFlashActive] = useState(false);
   const [walletBursts, setWalletBursts] = useState<{ id: number; trigger: number }[]>([]);
   /** Increments on coin impact to trigger wallet icon bounce (sparkles removed, bounce kept). */
@@ -2568,7 +2593,17 @@ export default function App() {
           
           // Slight delay so the two seeds don't overlap visually
           setTimeout(() => {
-            spawnProjectile(secondTargetIdx, seedLevel);
+            // Lucky Growth: bonus seed spawns a random in-between tier.
+            // Range is exclusive of both current seed level and highest discovered.
+            const minExclusive = Math.max(1, seedLevel);
+            const maxExclusive = Math.max(1, highestPlantEverRef.current);
+            const low = minExclusive + 1;
+            const high = maxExclusive - 1;
+            const bonusPlantLevel =
+              high >= low
+                ? low + Math.floor(Math.random() * (high - low + 1))
+                : seedLevel; // No in-between tier exists yet; fallback to current seed tier.
+            spawnProjectile(secondTargetIdx, bonusPlantLevel);
           }, 50);
         }
       }
@@ -3114,11 +3149,34 @@ export default function App() {
     return 1;
   }, []);
 
+  const spawnMaxPlantReachedToast = useCallback((cellIdx: number) => {
+    requestAnimationFrame(() => {
+      const el = document.getElementById(`hex-${cellIdx}`);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      // Store viewport coordinates so we can render in a fixed portal (no dependency on coin panel portal rect).
+      const x = r.left + r.width / 2;
+      const y = r.top + r.height / 2;
+      const id = `max-plant-${cellIdx}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const startTime = Date.now();
+      setMaxPlantToasts((prev) => [...prev, { id, x, y, startTime }]);
+      window.setTimeout(() => {
+        setMaxPlantToasts((prev) => prev.filter((t) => t.id !== id));
+      }, 1000);
+    });
+  }, []);
+
   const handleMerge = (sourceIdx: number, targetIdx: number) => {
     // Check if this will be a merge before updating state
     const source = grid[sourceIdx];
     const target = grid[targetIdx];
     const willMerge = source.item && target.item && target.item.level === source.item.level;
+
+    // Deny merges beyond max plant tier (24). Snap dragged plant back and show toast on the static plant.
+    if (willMerge && source.item?.level === 24 && target.item?.level === 24) {
+      spawnMaxPlantReachedToast(targetIdx);
+      return;
+    }
 
     // FTUE_3: successful drag 4→13 merge → fade out finger + textbox
     if (activeFtueStage === 'merge_drag' && sourceIdx === 4 && targetIdx === 13 && willMerge) {
@@ -4227,7 +4285,7 @@ export default function App() {
                         storageMax={HARVEST_CHARGES_MAX}
                         freeMode={harvestFreeMode}
                         bounceTrigger={harvestBounceTrigger}
-                        iconScale={1.5}
+                        iconScale={1.275}
                         onClick={handleHarvestClick}
                       />
                    </div>
@@ -4267,6 +4325,9 @@ export default function App() {
                     appScale={appScale}
                     ftue3OnlyMerge4To13={activeFtueStage === 'merge_drag'}
                     masteredPlantLevels={plantMastery.unlockedLevels}
+                    onMaxTierMergeAttempt={(staticCellIdx) => {
+                      spawnMaxPlantReachedToast(staticCellIdx);
+                    }}
                     onMergeImpactStart={(cellIdx, px, py, mergeResultLevel) => {
                       const container = containerRef.current;
                       if (!container) return;
@@ -4458,6 +4519,7 @@ export default function App() {
                     fertilizableCellCount={fertilizableCellCount}
                     onFertilizeCell={handleFertilizeCell}
                     highestPlantEver={highestPlantEver}
+                    masteredPlantLevels={plantMastery.unlockedLevels}
                     rewardedOffers={rewardedOffers}
                     playerLevel={playerLevel}
                     pendingUnlockUpgradeId={pendingUnlockUpgradeId}
@@ -4896,6 +4958,33 @@ export default function App() {
         {/* Leaf burst: portal to body so never clipped; viewport coords */}
         {(activeScreen === 'FARM' || activeScreen === 'BARN') && createPortal(
           <div className="fixed inset-0 pointer-events-none overflow-visible" style={{ zIndex: 55 }}>
+            {maxPlantToasts.map((t) => (
+              <div
+                key={t.id}
+                className="max-plant-toast absolute select-none"
+                style={{
+                  left: t.x,
+                  top: t.y - 26,
+                  transform: 'translate(-50%, -50%)',
+                  zIndex: 9999,
+                  fontFamily: 'Inter, sans-serif',
+                  fontWeight: 900,
+                  fontSize: '20px',
+                  letterSpacing: '-0.02em',
+                  color: '#ffffff',
+                  textShadow:
+                    `0 2px 0 rgba(0,0,0,0.25), ` +
+                    `1.5px 0 0 #1f5a2a, ` +
+                    `-1.5px 0 0 #1f5a2a, ` +
+                    `0 1.5px 0 #1f5a2a, ` +
+                    `0 -1.5px 0 #1f5a2a`,
+                  whiteSpace: 'nowrap',
+                  opacity: 1,
+                }}
+              >
+                Max Plant Reached
+              </div>
+            ))}
             {leafBursts.map((b) => (
               <LeafBurst
                 key={b.id}
@@ -5470,6 +5559,11 @@ export default function App() {
                 }}
                 title={limitedOfferPopup.title}
                 imageSrc={limitedOfferPopup.imageSrc}
+                imageLevel={limitedOfferPopup.imageLevel}
+                imageMastered={
+                  typeof limitedOfferPopup.imageLevel === 'number' &&
+                  plantMastery.unlockedLevels.includes(limitedOfferPopup.imageLevel)
+                }
                 subtitle={limitedOfferPopup.subtitle}
                 description={limitedOfferPopup.description}
                 buttonText={limitedOfferPopup.buttonText}

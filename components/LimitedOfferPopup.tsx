@@ -46,6 +46,8 @@ interface LimitedOfferPopupProps {
   onCloseButtonClick?: (acceptButtonRect: DOMRect) => void;
   showCloseButton?: boolean;
   imageLevel?: number;
+  /** When `imageLevel` is set, use mastered pot art variant. */
+  imageMastered?: boolean;
   closeOnBackdropClick?: boolean;
   appScale?: number;
   /** When set, show "active boost" view: brown disabled-style button with "Active: XXs" countdown; button does nothing */
@@ -160,6 +162,7 @@ export const LimitedOfferPopup: React.FC<LimitedOfferPopupProps> = ({
   onCloseButtonClick,
   showCloseButton = true,
   imageLevel,
+  imageMastered = false,
   closeOnBackdropClick = true,
   appScale = 1,
   activeBoostEndTime,
@@ -482,13 +485,13 @@ export const LimitedOfferPopup: React.FC<LimitedOfferPopupProps> = ({
             <div
               className="relative"
               style={{
-                width: subtitleSettingsStyle ? 86 : 75,
-                height: subtitleSettingsStyle ? 86 : 75,
-                marginTop: -4,
+                width: subtitleSettingsStyle ? 88 : 78,
+                height: subtitleSettingsStyle ? 98 : 88,
+                marginTop: -6,
                 filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))',
               }}
             >
-              <PlantWithPot level={imageLevel} wrapperClassName="h-full w-full" />
+              <PlantWithPot level={imageLevel} mastered={imageMastered} wrapperClassName="h-full w-full" />
             </div>
           ) : (
             <img

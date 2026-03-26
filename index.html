@@ -232,6 +232,16 @@
         .store-free-offer-bounce {
             animation: store-free-offer-bounce 0.48s ease-in-out;
         }
+        /* Toast: "Max Plant Reached" (board merge deny) */
+        @keyframes max-plant-toast {
+            0% { opacity: 0; transform: translate(-50%, -50%) translateY(8px) scale(0.98); }
+            15% { opacity: 1; transform: translate(-50%, -50%) translateY(0px) scale(1); }
+            75% { opacity: 1; transform: translate(-50%, -50%) translateY(-10px) scale(1); }
+            100% { opacity: 0; transform: translate(-50%, -50%) translateY(-16px) scale(1.01); }
+        }
+        .max-plant-toast {
+            animation: max-plant-toast 950ms ease-out forwards;
+        }
     </style>
 </head>
 <body>

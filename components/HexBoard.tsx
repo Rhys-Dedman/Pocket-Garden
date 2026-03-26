@@ -56,6 +56,8 @@ interface HexBoardProps {
   ftue3OnlyMerge4To13?: boolean;
   /** Plant levels whose mastery was purchased; render mastered pot variant. */
   masteredPlantLevels?: number[];
+  /** Called when player tries to merge max tier into max tier (e.g. 24→24). */
+  onMaxTierMergeAttempt?: (staticCellIdx: number) => void;
 }
 
 const HEX_SPRITE_EXT = '.png';
@@ -90,6 +92,7 @@ export const HexBoard: React.FC<HexBoardProps> = ({
   onDeletePlant,
   ftue3OnlyMerge4To13 = false,
   masteredPlantLevels = [],
+  onMaxTierMergeAttempt,
 }) => {
   const liftStartRef = useRef<number>(0);
   const flyStartRef = useRef<number>(0);
@@ -290,7 +293,14 @@ export const HexBoard: React.FC<HexBoardProps> = ({
         const targetCell = targetIdx != null ? grid[targetIdx] : null;
         // Locked cells cannot be drop targets
         const isLocked = targetCell?.locked === true;
-        const isValidMerge = targetIdx != null && targetIdx !== dragState.cellIdx && !isLocked && targetCell?.item && targetCell.item.level === dragState.item.level;
+        const isSameLevelMerge =
+          targetIdx != null &&
+          targetIdx !== dragState.cellIdx &&
+          !isLocked &&
+          targetCell?.item &&
+          targetCell.item.level === dragState.item.level;
+        const isMaxTierMergeAttempt = isSameLevelMerge && dragState.item.level >= 24;
+        const isValidMerge = isSameLevelMerge && !isMaxTierMergeAttempt;
         const isEmptyCell = targetIdx != null && targetIdx !== dragState.cellIdx && !isLocked && targetCell?.item == null;
         const droppedOnSameCell = targetIdx === dragState.cellIdx;
         // Check for swap: dropping on a plant that can't merge (different level)
@@ -307,7 +317,13 @@ export const HexBoard: React.FC<HexBoardProps> = ({
           return;
         }
 
-        if (isValidMerge) {
+        if (isMaxTierMergeAttempt) {
+          // Deny immediately (same behavior as dropping on a non-mergeable plant): fly back to origin.
+          // Fire toast on release on the static plant (target cell).
+          if (targetIdx != null) onMaxTierMergeAttempt?.(targetIdx);
+          onReleaseFromCell(dragState.cellIdx);
+          startFlyBack(releaseState);
+        } else if (isValidMerge) {
           onReleaseFromCell(dragState.cellIdx);
           startFlyBack(releaseState, targetIdx!, true, false);
         } else if (inBounds && isEmptyCell) {

@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { TabType } from '../types';
 import { assetPath } from '../utils/assetPath';
 import { getPlantCoinValue } from '../utils/plantValue';
+import { PlantWithPot } from './PlantWithPot';
 
 export interface UpgradeState {
   level: number;
@@ -11,9 +12,29 @@ export interface UpgradeState {
 
 export type SeedsState = Record<string, UpgradeState>;
 
-/** Seed level from highest plant discovered: 1 + floor((highestPlant - 1) / 4). Every 4 plants = +1 seed level. */
+/**
+ * Seed level from highest plant discovered (custom curve).
+ * Start at 1, then:
+ * - Plant 4  → seed 2
+ * - Plant 7  → seed 3
+ * - Plant 10 → seed 4
+ * - Plant 13 → seed 5
+ * - Plant 16 → seed 6
+ * - Plant 19 → seed 7
+ * - Plant 22 → seed 8
+ * - Plant 24 → seed 9
+ */
 export const getSeedLevelFromHighestPlant = (highestPlant: number): number => {
-  return 1 + Math.floor((Math.max(1, highestPlant) - 1) / 4);
+  const hp = Math.max(1, Math.floor(highestPlant));
+  if (hp >= 24) return 9;
+  if (hp >= 22) return 8;
+  if (hp >= 19) return 7;
+  if (hp >= 16) return 6;
+  if (hp >= 13) return 5;
+  if (hp >= 10) return 4;
+  if (hp >= 7) return 3;
+  if (hp >= 4) return 2;
+  return 1;
 };
 
 /** Get the bonus seed chance percentage (0-50%, 5% per level, max level 10) */
@@ -152,6 +173,8 @@ interface UpgradeListProps {
   onFertilizeCell?: () => void;
   /** Highest plant level ever achieved by the player */
   highestPlantEver?: number;
+  /** Plant levels that have a mastered (golden) pot unlocked. */
+  masteredPlantLevels?: number[];
   /** Rewarded offers to display at top of relevant tabs */
   rewardedOffers?: RewardedOffer[];
   /** Called when the rewarded offer panel (not the button) is clicked - e.g. reopen limited offer popup */
@@ -200,22 +223,22 @@ const formatCost = (cost: number): string => {
 
 const SEEDS_UPGRADES: UpgradeDef[] = [
   { id: 'seed_production', name: 'Production Speed', icon: assetPath('/assets/icons/icon_seedproduction.png'), description: 'Increase how fast seeds are produced' },
+  { id: 'bonus_seeds', name: 'LUCKY GROWTH', icon: assetPath('/assets/icons/icon_luckyseed.png'), description: 'Increase chance to spawn a bonus higher-tier plant' },
   { id: 'double_seeds', name: 'DOUBLE SEEDS', icon: assetPath('/assets/icons/icon_seedquality.png'), description: 'Increase the chance to produce 2 seeds each recharge' },
-  { id: 'bonus_seeds', name: 'LUCKY GROWTH', icon: assetPath('/assets/icons/icon_luckyseed.png'), description: 'Increase the chance for seeds to grow an extra plant' },
 ];
 
 const SEEDS_UNLOCK_LEVELS: Record<string, number> = {
   seed_production: 1,
   seed_storage: 2, // Storage Capacity: unlocks at level 2
   // Unlock positions used for both cost + FTUE pricing alignment.
-  double_seeds: 7, // Seed Double unlocks at player level 7
-  bonus_seeds: 8, // Lucky Growth unlocks at player level 8
+  bonus_seeds: 6, // Lucky Growth unlocks at player level 6
+  double_seeds: 8, // Double Seeds unlocks at player level 8
 };
 
 const CROPS_UNLOCK_LEVELS: Record<string, number> = {
   harvest_speed: 1,
   plot_expansion: 2, // Garden Expansion unlocks at player level 2
-  crop_value: 6, // Crop Yield unlocks at player level 6
+  crop_value: 7, // Crop Yield unlocks at player level 7
   fertile_soil: 9, // Fertile Soil unlocks at player level 9
   merge_harvest: 10,
 };
@@ -296,9 +319,9 @@ export const getLevelUnlockInfo = (level: number): { title: string; description:
     { level: 3, upgradeId: 'seed_surplus', tab: 'HARVEST', name: 'Surplus Recharges', description: 'Increase coins gained from extra seed and harvest recharges', icon: 'icon_seedsurplus.png', popupDescription: 'Increase coins gained from extra seed and harvest recharges' },
     { level: 4, upgradeId: '', tab: 'HARVEST', name: 'Extra Orders', description: 'You can now recieve up to 4 orders at a time', icon: 'icon_extracustomer.png', popupDescription: 'You can now recieve up to 4 orders at a time' },
     { level: 5, upgradeId: 'market_value', tab: 'HARVEST', name: 'Market Value', description: 'Increase the coins earned when completing orders', icon: 'icon_marketvalue.png' },
-    { level: 6, upgradeId: 'crop_value', tab: 'CROPS', name: 'Crop Yield', description: 'Increase how many crops your plants produce when harvesting', icon: 'icon_cropvalue.png', popupDescription: 'You can now increase how many crops your plants produce when harvesting' },
-    { level: 7, upgradeId: 'double_seeds', tab: 'SEEDS', name: 'Double Seeds', description: 'Increase the chance to produce 2 seeds each recharge', icon: 'icon_seedquality.png', popupDescription: 'Increase the chance to produce 2 seeds each recharge' },
-    { level: 8, upgradeId: 'bonus_seeds', tab: 'SEEDS', name: 'Lucky Growth', description: 'Increase the chance for seeds to grow an extra plant', icon: 'icon_luckyseed.png' },
+    { level: 6, upgradeId: 'bonus_seeds', tab: 'SEEDS', name: 'Lucky Growth', description: 'Increase chance to spawn a bonus higher-tier plant', icon: 'icon_luckyseed.png', popupDescription: 'Increase chance to spawn a bonus higher-tier plant' },
+    { level: 7, upgradeId: 'crop_value', tab: 'CROPS', name: 'Crop Yield', description: 'Increase how many crops your plants produce when harvesting', icon: 'icon_cropvalue.png', popupDescription: 'You can now increase how many crops your plants produce when harvesting' },
+    { level: 8, upgradeId: 'double_seeds', tab: 'SEEDS', name: 'Double Seeds', description: 'Increase the chance to produce 2 seeds each recharge', icon: 'icon_seedquality.png', popupDescription: 'Increase the chance to produce 2 seeds each recharge' },
     { level: 9, upgradeId: 'fertile_soil', tab: 'CROPS', name: 'Fertile Soil', description: 'You can now create fertile soil to yield double crops when harvesting', icon: 'icon_fetilesoil.png', popupDescription: 'You can now create fertile soil to yield double crops when harvesting' },
     { level: 10, upgradeId: 'happy_customer', tab: 'HARVEST', name: 'Happy Customers', description: 'Increase chance that customers pay double for orders', icon: 'icon_happycustomer.png', popupDescription: 'You can now increase the chance for customers to pay double coins for orders' },
   ];
@@ -518,7 +541,7 @@ export const createInitialHarvestState = (): Record<string, UpgradeState> => ({
   happy_customer: { level: 0, progress: 0 },
 });
 
-export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange, money, setMoney, seedsState: propsSeedsState, setSeedsState: propsSetSeedsState, harvestState: propsHarvestState, setHarvestState: propsSetHarvestState, cropsState: propsCropsState, setCropsState: propsSetCropsState, lockedCellCount = 0, onUnlockCell, fertilizableCellCount = 0, onFertilizeCell, highestPlantEver = 1, rewardedOffers = [], onRewardedOfferPanelClick, onRewardedOfferClick, playerLevel = 1, pendingUnlockUpgradeId = null, pendingOfferHighlightId = null, isExpanded = false, protectedOfferId = null, ftue10GreenFlashUpgradeId = null, ftue10PurchaseButtonRef, ftue10LockScroll = false, onUpgradePurchase }) => {
+export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange, money, setMoney, seedsState: propsSeedsState, setSeedsState: propsSetSeedsState, harvestState: propsHarvestState, setHarvestState: propsSetHarvestState, cropsState: propsCropsState, setCropsState: propsSetCropsState, lockedCellCount = 0, onUnlockCell, fertilizableCellCount = 0, onFertilizeCell, highestPlantEver = 1, masteredPlantLevels = [], rewardedOffers = [], onRewardedOfferPanelClick, onRewardedOfferClick, playerLevel = 1, pendingUnlockUpgradeId = null, pendingOfferHighlightId = null, isExpanded = false, protectedOfferId = null, ftue10GreenFlashUpgradeId = null, ftue10PurchaseButtonRef, ftue10LockScroll = false, onUpgradePurchase }) => {
   const [internalSeedsState, setInternalSeedsState] = useState<Record<string, UpgradeState>>(createInitialSeedsState);
   const seedsState = propsSeedsState ?? internalSeedsState;
   const setSeedsState = propsSetSeedsState ?? setInternalSeedsState;
@@ -898,7 +921,15 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
         <div className="flex items-center p-1.5 px-3">
           {/* Square Icon Box - same size as standard upgrade icon (30px); emoji or image */}
           <div className="w-[38px] h-[38px] shrink-0 flex items-center justify-center bg-[#764f40] rounded-[8px] shadow-sm overflow-hidden">
-            {offer.icon.startsWith('/') || offer.icon.includes('.png') ? (
+            {offer.id === 'special_delivery' ? (
+              <div className="relative" style={{ width: 30, height: 34, marginTop: 2 }}>
+                <PlantWithPot
+                  level={Math.max(1, Math.min(24, highestPlantEver - 1))}
+                  mastered={masteredPlantLevels.includes(Math.max(1, Math.min(24, highestPlantEver - 1)))}
+                  wrapperClassName="h-full w-full"
+                />
+              </div>
+            ) : offer.icon.startsWith('/') || offer.icon.includes('.png') ? (
               <img src={assetPath(offer.icon)} alt="" className="w-[30px] h-[30px] object-contain" />
             ) : (
               <span className="text-[22px] leading-none select-none">{offer.icon}</span>
