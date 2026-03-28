@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback, useState } from 'react';
+import React, { useRef, useEffect, useCallback, useState, forwardRef, useImperativeHandle } from 'react';
 import { flushSync } from 'react-dom';
 import { BoardCell, Item, DragState } from '../types';
 import { PLANT_CONTAINER_WIDTH, PLANT_CONTAINER_HEIGHT } from '../constants/boardLayout';
@@ -12,6 +12,8 @@ const LIFT_MS = 120;
 const SCALE_UP_MS = 60;
 const FLYBACK_SPEED_PX_PER_MS = 1;
 const FLYBACK_MIN_MS = 50;
+/** Auto-merge slide only: 50% slower fly speed → 2× duration vs player drag merge. */
+const AUTO_MERGE_FLY_DURATION_MULT = 2;
 const IMPACT_BOUNCE_MS = 400;
 const SWAP_RETURN_MS = 200;
 
@@ -58,7 +60,14 @@ interface HexBoardProps {
   masteredPlantLevels?: number[];
   /** Called when player tries to merge max tier into max tier (e.g. 24→24). */
   onMaxTierMergeAttempt?: (staticCellIdx: number) => void;
+  /** After auto-merge impact bounce finishes (same timing as drag merge clearing). */
+  onProgrammaticMergeSettled?: (sourceIdx: number, targetIdx: number) => void;
 }
+
+export type HexBoardHandle = {
+  /** Pass `gridSnapshot` from the same frame as `findBestAutoMergePair` so validation matches the checker (avoids stale board prop). */
+  beginProgrammaticMerge: (sourceIdx: number, targetIdx: number, gridSnapshot?: BoardCell[]) => boolean;
+};
 
 const HEX_SPRITE_EXT = '.png';
 const HEXCELL_GREEN = assetPath(`/assets/hex/hexcell_green${HEX_SPRITE_EXT}`);
@@ -67,7 +76,7 @@ const HEXCELL_WHITE = assetPath(`/assets/hex/hexcell_white${HEX_SPRITE_EXT}`);
 const HEXCELL_LOCKED = assetPath(`/assets/hex/hexcell_locked${HEX_SPRITE_EXT}`);
 const HEXCELL_FERTILE = assetPath(`/assets/hex/hexcell_fertile${HEX_SPRITE_EXT}`);
 
-export const HexBoard: React.FC<HexBoardProps> = ({
+export const HexBoard = forwardRef<HexBoardHandle, HexBoardProps>(function HexBoard({
   isActive,
   grid,
   onMerge,
@@ -93,11 +102,18 @@ export const HexBoard: React.FC<HexBoardProps> = ({
   ftue3OnlyMerge4To13 = false,
   masteredPlantLevels = [],
   onMaxTierMergeAttempt,
-}) => {
+  onProgrammaticMergeSettled,
+}, ref) {
   const liftStartRef = useRef<number>(0);
   const flyStartRef = useRef<number>(0);
   const rafRef = useRef<number>(0);
+  const dragStateRef = useRef<DragState | null>(null);
+  dragStateRef.current = dragState;
   const swapRafRef = useRef<number>(0);
+  /** Auto-merge fly: update transforms on the DOM each rAF so React doesn’t re-render every frame (smooth 60fps). */
+  const autoMergeDragOuterRef = useRef<HTMLDivElement | null>(null);
+  const autoMergeDragInnerRef = useRef<HTMLDivElement | null>(null);
+  const autoMergeTargetInnerRef = useRef<HTMLDivElement | null>(null);
   const [swapReturn, setSwapReturn] = useState<SwapReturnState | null>(null);
   const [swapImpactCellIdx, setSwapImpactCellIdx] = useState<number | null>(null);
 
@@ -235,6 +251,56 @@ export const HexBoard: React.FC<HexBoardProps> = ({
       flyBackDurationMs: durationMs,
     });
   }, [getHexCenterInContainer, getMergeLevelIncrease]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      beginProgrammaticMerge: (sourceIdx: number, targetIdx: number, gridSnapshot?: BoardCell[]) => {
+        if (dragStateRef.current != null) return false;
+        const g = gridSnapshot ?? grid;
+        const cell = g[sourceIdx];
+        const tcell = g[targetIdx];
+        if (!cell?.item || cell.locked) return false;
+        if (!tcell?.item || tcell.locked) return false;
+        if (tcell.item.level !== cell.item.level || tcell.item.type !== cell.item.type) return false;
+        if (cell.item.level >= 24) return false;
+        const levelIncrease = getMergeLevelIncrease?.(cell.item.level) ?? 1;
+        const origin = getHexCenterInContainer(sourceIdx);
+        const curX = origin.x;
+        const curY = origin.y;
+        const targetCenter = getHexCenterInContainer(targetIdx);
+        const distance = Math.hypot(targetCenter.x - curX, targetCenter.y - curY);
+        const durationMs =
+          Math.max(FLYBACK_MIN_MS, distance / FLYBACK_SPEED_PX_PER_MS) * AUTO_MERGE_FLY_DURATION_MULT;
+        onReleaseFromCell(sourceIdx);
+        flyStartRef.current = Date.now();
+        setDragState({
+          phase: 'flyingBack',
+          cellIdx: sourceIdx,
+          item: cell.item,
+          pointerX: curX,
+          pointerY: curY,
+          originX: origin.x,
+          originY: origin.y,
+          grabPointerX: curX,
+          grabPointerY: curY,
+          liftProgress: 1,
+          scaleProgress: 1,
+          flyProgress: 0,
+          flyBackDurationMs: durationMs,
+          targetCellIdx: targetIdx,
+          isMerge: true,
+          mergeResultLevel: cell.item.level + levelIncrease,
+          isAutoMerge: true,
+          hoveredEmptyCellIdx: null,
+          hoveredMatchCellIdx: null,
+          hoveredSwapCellIdx: null,
+        });
+        return true;
+      },
+    }),
+    [grid, getHexCenterInContainer, getMergeLevelIncrease, onReleaseFromCell, setDragState]
+  );
 
   // Pointer down: start pickup immediately if cell has plant (allowed during impact)
   const handlePointerDown = useCallback((index: number, e: React.PointerEvent) => {
@@ -384,13 +450,68 @@ export const HexBoard: React.FC<HexBoardProps> = ({
         ? getHexCenterInContainer(dragState.targetCellIdx).y
         : dragState.originY;
     const durationMs = dragState.flyBackDurationMs ?? 300;
+    const isAutoMergeFly = dragState.isAutoMerge === true;
+    // Player drag: early impact (t≥0.7) feels snappy; eased position is only ~70% there — visible snap on slow auto-merge.
     const CUTOVER = 0.85;
-    const impactStartT = durationMs <= 120 ? 1 : 0.7;
+    const impactStartT = isAutoMergeFly ? 1 : durationMs <= 120 ? 1 : 0.7;
+    const easeInOutCubic = (u: number) =>
+      u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+    const sourceIdxForFly = dragState.cellIdx;
+    const sourceCellForFly = grid[sourceIdxForFly];
+    const baseX =
+      sourceCellForFly != null
+        ? hexSize * (3 / 2) * sourceCellForFly.q * horizontalSpacing * gridSpacing
+        : 0;
+    const baseY =
+      sourceCellForFly != null
+        ? hexSize * Math.sqrt(3) * (sourceCellForFly.r + sourceCellForFly.q / 2) * verticalSpacing * gridSpacing
+        : 0;
+    const originXFly = dragState.originX;
+    const originYFly = dragState.originY;
+    const idleDefaultY = 5.5;
+
+    const clearAutoMergeFlyDomStyles = () => {
+      for (const el of [
+        autoMergeDragOuterRef.current,
+        autoMergeDragInnerRef.current,
+        autoMergeTargetInnerRef.current,
+      ]) {
+        if (el) {
+          el.style.removeProperty('transform');
+          el.style.removeProperty('will-change');
+        }
+      }
+    };
+
+    const applyAutoMergeFlyDom = (x: number, y: number, eased: number) => {
+      const outer = autoMergeDragOuterRef.current;
+      const inner = autoMergeDragInnerRef.current;
+      const targetInner = autoMergeTargetInnerRef.current;
+      if (outer) {
+        outer.style.willChange = 'transform';
+        const dx = (x - originXFly) / gridScale;
+        const dy = (y - originYFly) / gridScale;
+        outer.style.transform = `translate(calc(-50% + ${baseX}px), calc(-50% + ${baseY}px)) translate(${dx}px, ${dy}px)`;
+      }
+      if (inner) {
+        const liftDuringFly = idleDefaultY + (20 - idleDefaultY) * (1 - eased);
+        const scaleFlying = 1.7 - 0.7 * eased;
+        inner.style.transformOrigin = '50% 50%';
+        inner.style.transform = `translateY(${liftDuringFly}px) scale(${scaleFlying})`;
+      }
+      if (targetInner) {
+        const mergeScale = 1.5 - 0.5 * eased;
+        targetInner.style.transformOrigin = '50% 50%';
+        targetInner.style.transform = `translateY(-5.5px) scale(${mergeScale})`;
+      }
+    };
+
     const tick = () => {
       const elapsed = Date.now() - flyStartRef.current;
       const t = Math.min(elapsed / durationMs, 1);
-      const eased =
-        t < CUTOVER
+      const eased = isAutoMergeFly
+        ? easeInOutCubic(t)
+        : t < CUTOVER
           ? CUTOVER * (2.1 * (t / CUTOVER) ** 2 - 1.1 * (t / CUTOVER) ** 3)
           : CUTOVER + (1 - CUTOVER) * ((t - CUTOVER) / (1 - CUTOVER));
       const x = fromX + (toX - fromX) * eased;
@@ -426,6 +547,9 @@ export const HexBoard: React.FC<HexBoardProps> = ({
           // Use the pre-calculated mergeResultLevel (includes lucky merge)
           onMergeImpactStart?.(targetCellIdx, toX, toY, dragState.mergeResultLevel);
         }
+        if (isAutoMergeFly) {
+          clearAutoMergeFlyDomStyles();
+        }
         flushSync(() => {
           setDragState((prev) =>
             prev && prev.phase === 'flyingBack'
@@ -442,24 +566,59 @@ export const HexBoard: React.FC<HexBoardProps> = ({
           );
         });
         setTimeout(() => {
-          setDragState((prev) =>
-            prev && prev.phase === 'impact' && prev.cellIdx === sourceIdx && prev.targetCellIdx === targetCellIdx
-              ? null
-              : prev
-          );
+          setDragState((prev) => {
+            if (prev && prev.phase === 'impact' && prev.cellIdx === sourceIdx && prev.targetCellIdx === targetCellIdx) {
+              if (prev.isAutoMerge) {
+                onProgrammaticMergeSettled?.(sourceIdx, targetCellIdx);
+              }
+              return null;
+            }
+            return prev;
+          });
         }, IMPACT_BOUNCE_MS);
+        return;
+      }
+      if (isAutoMergeFly) {
+        applyAutoMergeFlyDom(x, y, eased);
+        rafRef.current = requestAnimationFrame(tick);
         return;
       }
       setDragState((prev) =>
         prev && prev.phase === 'flyingBack'
-          ? { ...prev, flyProgress: t, pointerX: x, pointerY: y }
+          ? {
+              ...prev,
+              flyProgress: t,
+              pointerX: x,
+              pointerY: y,
+            }
           : prev
       );
       rafRef.current = requestAnimationFrame(tick);
     };
+    if (isAutoMergeFly) {
+      applyAutoMergeFlyDom(fromX, fromY, 0);
+    }
     rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [dragState?.phase === 'flyingBack' ? dragState.cellIdx : -1, dragState?.targetCellIdx, getHexCenterInContainer, onReturnImpact, onMergeImpactStart, onMerge, onSwap, onLandOnNewCell, grid]);
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+      if (isAutoMergeFly) clearAutoMergeFlyDomStyles();
+    };
+  }, [
+    dragState?.phase === 'flyingBack' ? dragState.cellIdx : -1,
+    dragState?.targetCellIdx,
+    getHexCenterInContainer,
+    onReturnImpact,
+    onMergeImpactStart,
+    onMerge,
+    onSwap,
+    onLandOnNewCell,
+    onProgrammaticMergeSettled,
+    grid,
+    hexSize,
+    horizontalSpacing,
+    gridSpacing,
+    verticalSpacing,
+  ]);
 
   // Swap return animation: animate the swapped plant flying to its new cell
   useEffect(() => {
@@ -780,6 +939,8 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                 const mergeScale = 1.5 - 0.5 * (dragState?.flyProgress ?? 0);
                 const scale = isDragged ? dragScale : isMergeTargetDuringFly ? mergeScale : 1.5;
                 const level = isDragged && dragState?.mergeResultLevel != null ? dragState.mergeResultLevel : item.level;
+                const useDomFlyDrive = isDragged && isFlying && dragState?.isAutoMerge === true;
+                const useDomFlyTarget = isMergeTargetDuringFly && dragState?.isAutoMerge === true;
                 const transform = isDragged
                   ? `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) translate(${dragOffsetX}px, ${dragOffsetY}px)`
                   : `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
@@ -802,22 +963,41 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                 ].filter(Boolean).join(' ');
                 const spawnBounceClass = isImpacted && !isDragged ? 'plant-spawn-bounce' : '';
 
+                const outerStyle: React.CSSProperties = {
+                  left: centerX,
+                  top: centerY,
+                  width: `${hexWidth}px`,
+                  height: `${hexHeight}px`,
+                  zIndex: 50 + Math.round(y) + (isDragged ? 1000 : 0),
+                };
+                if (useDomFlyDrive) {
+                  outerStyle.willChange = 'transform';
+                } else {
+                  outerStyle.transform = transform;
+                }
+
+                const innerStyle: React.CSSProperties = { transformOrigin: '50% 50%' };
+                if (!useDomFlyDrive && !useDomFlyTarget) {
+                  innerStyle.transform = innerTransform;
+                }
+
                 return (
                   <div
                     key={`plant-${i}`}
+                    ref={useDomFlyDrive ? autoMergeDragOuterRef : undefined}
                     className="absolute flex items-center justify-center"
-                    style={{
-                      left: centerX,
-                      top: centerY,
-                      width: `${hexWidth}px`,
-                      height: `${hexHeight}px`,
-                      transform,
-                      zIndex: 50 + Math.round(y) + (isDragged ? 1000 : 0),
-                    }}
+                    style={outerStyle}
                   >
                     <div className="flex flex-col items-center justify-center relative w-full h-full">
                       <div
-                        style={{ transform: innerTransform, transformOrigin: '50% 50%' }}
+                        ref={
+                          useDomFlyDrive
+                            ? autoMergeDragInnerRef
+                            : useDomFlyTarget
+                              ? autoMergeTargetInnerRef
+                              : undefined
+                        }
+                        style={innerStyle}
                         className={`flex items-center justify-center w-full h-full ${innerClass}`}
                       >
                         {/* 70% on outer root — same as pre-pot `<img className="w-[70%] h-[70%]">` vs hex inner cell (w-full h-full) */}
@@ -898,4 +1078,4 @@ export const HexBoard: React.FC<HexBoardProps> = ({
     </div>
     </>
   );
-};
+});

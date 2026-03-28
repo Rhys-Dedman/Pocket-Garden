@@ -52,4 +52,6 @@ export interface DragState {
   isMerge?: boolean;
   isSwap?: boolean;
   mergeResultLevel?: number;
+  /** True when merge was started by auto-merge (not player drag). */
+  isAutoMerge?: boolean;
 }

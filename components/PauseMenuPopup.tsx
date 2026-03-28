@@ -4,6 +4,7 @@
 import React, { useState, useEffect, type CSSProperties } from 'react';
 import { assetPath } from '../utils/assetPath';
 import { getPerformanceMode, setPerformanceMode } from '../utils/performanceMode';
+import { getAutoMergeMode, setAutoMergeMode } from '../utils/autoMergeMode';
 
 interface PauseMenuPopupProps {
   isVisible: boolean;
@@ -18,6 +19,8 @@ interface PauseMenuPopupProps {
   onGoldenPotClick?: () => void;
   /** Dev/cheat: add coins (e.g. +100k). Does not close pause menu. */
   onAddMoney?: (amount: number) => void;
+  /** Sync auto-merge toggle to parent (gameplay only reacts when this updates). */
+  onAutoMergeChange?: (enabled: boolean) => void;
   /** Clear save and reload (fresh FTUE). */
   onResetProgress?: () => void;
   /** Remove all active boosts (bar + timers + gameplay effects). */
@@ -100,6 +103,7 @@ export const PauseMenuPopup: React.FC<PauseMenuPopupProps> = ({
   onResetProgress,
   onClearBoosts,
   onClearShed,
+  onAutoMergeChange,
   canUnlockPlant = true,
   closeOnBackdropClick = true,
   appScale = 1,
@@ -114,9 +118,13 @@ export const PauseMenuPopup: React.FC<PauseMenuPopupProps> = ({
   const [clearBoostsPressed, setClearBoostsPressed] = useState(false);
   const [clearShedPressed, setClearShedPressed] = useState(false);
   const [performanceMode, setPerformanceModeLocal] = useState(false);
+  const [autoMergeMode, setAutoMergeModeLocal] = useState(false);
 
   useEffect(() => {
-    if (isVisible) setPerformanceModeLocal(getPerformanceMode());
+    if (isVisible) {
+      setPerformanceModeLocal(getPerformanceMode());
+      setAutoMergeModeLocal(getAutoMergeMode());
+    }
   }, [isVisible]);
 
   useEffect(() => {
@@ -274,6 +282,27 @@ export const PauseMenuPopup: React.FC<PauseMenuPopupProps> = ({
                 >
                   <span className="font-bold tracking-tight" style={settingsCheatLabelStyle(SETTINGS_PALETTES.green)}>
                     Performance Mode {performanceMode ? 'ON' : 'OFF'}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !autoMergeMode;
+                    setAutoMergeModeLocal(next);
+                    setAutoMergeMode(next);
+                    onAutoMergeChange?.(next);
+                  }}
+                  className="relative flex items-center justify-center rounded-lg transition-all w-full"
+                  style={{
+                    height: `${SETTINGS_BUTTON_HEIGHT_PX}px`,
+                    backgroundColor: SETTINGS_PALETTES.green.bg,
+                    border: `3px solid ${SETTINGS_PALETTES.green.border}`,
+                    borderRadius: '12px',
+                    boxShadow: `0 4px 0 ${SETTINGS_PALETTES.green.border}, 0 6px 12px rgba(0,0,0,0.15)`,
+                  }}
+                >
+                  <span className="font-bold tracking-tight" style={settingsCheatLabelStyle(SETTINGS_PALETTES.green)}>
+                    Auto Merge {autoMergeMode ? 'ON' : 'OFF'}
                   </span>
                 </button>
                 {/* 2. +1Mil Coins — green */}

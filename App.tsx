@@ -1,7 +1,7 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { createPortal, flushSync } from 'react-dom';
-import { HexBoard } from './components/HexBoard';
+import { HexBoard, type HexBoardHandle } from './components/HexBoard';
 import { UpgradeTabs } from './components/UpgradeTabs';
 import { UpgradeList, createInitialSeedsState, createInitialHarvestState, createInitialCropsState, getSeedLevelFromHighestPlant, getBonusSeedChance, getSeedSurplusValue, getSeedStorageMax, getCropYieldPerHarvest, getHarvestSpeedLevel, getMergeHarvestChance, getGoalLoadingSeconds, getMarketValueMultiplier, getPremiumOrdersMinLevel, getSurplusSalesMultiplier, isSurplusSalesUnlocked, getHappyCustomerChance, HarvestState, UpgradeState, RewardedOffer, getLevelUnlockInfo, isCustomerSpeedMaxed } from './components/UpgradeList';
 import { Navbar } from './components/Navbar';
@@ -48,6 +48,7 @@ import type { FtueStageId } from './ftue/ftueConfig';
 import { assetPath } from './utils/assetPath';
 import { getTickCount60, TARGET_FRAME_MS, scheduleNextFrame } from './utils/raf60';
 import { getPerformanceMode } from './utils/performanceMode';
+import { getAutoMergeMode } from './utils/autoMergeMode';
 import {
   DOUBLE_COINS_HEADER_ICON,
   DOUBLE_COINS_OFFER_ID,
@@ -559,6 +560,121 @@ function getInitialQuickResumeLoad(): boolean {
   }
 }
 
+/**
+ * Max merge **result** tier allowed while plant orders are open: `min` of active green goal plant types.
+ * Merging L+L → (L+1) must satisfy (L+1) ≤ cap, so we never auto-merge past the strictest open order (e.g. order for 4 blocks 4+4→5).
+ * No plant goals → null (no cap except level 24).
+ */
+function getActiveOrderMergeResultCap(
+  goalPlantTypes: number[],
+  goalSlots: ('empty' | 'loading' | 'green' | 'completed')[],
+  goalCounts: number[]
+): number | null {
+  const tiers: number[] = [];
+  for (let i = 0; i < goalPlantTypes.length; i++) {
+    const pt = goalPlantTypes[i];
+    if (pt < 1 || pt > 24) continue;
+    if (goalSlots[i] !== 'green') continue;
+    if ((goalCounts[i] ?? 0) <= 0) continue;
+    tiers.push(pt);
+  }
+  if (tiers.length === 0) return null;
+  return Math.min(...tiers);
+}
+
+/**
+ * Targets of in-flight seeds whose plant is not on the grid yet (`spawnCropAt` runs in onImpact but the
+ * projectile stays mounted until the fly animation ends). Excluding only these cells fixes auto-merge stalling
+ * while other mergable pairs are already valid.
+ */
+function getPendingSeedImpactTargets(grid: BoardCell[], projectiles: ProjectileData[]): Set<number> {
+  const pending = new Set<number>();
+  for (const p of projectiles) {
+    const cell = grid[p.targetIdx];
+    if (!cell?.item) pending.add(p.targetIdx);
+  }
+  return pending;
+}
+
+/** Same merge eligibility as manual play (HexBoard drop): same level + type, not locked, not max tier; not hex-adjacency. */
+function canAutoMergePlantPair(
+  grid: BoardCell[],
+  i: number,
+  j: number,
+  mergeResultCap: number | null,
+  excludeCells?: ReadonlySet<number>
+): boolean {
+  if (excludeCells?.has(i) || excludeCells?.has(j)) return false;
+  const cell = grid[i];
+  const other = grid[j];
+  if (!cell?.item || cell.locked || !other?.item || other.locked) return false;
+  if (other.item.level !== cell.item.level || other.item.type !== cell.item.type) return false;
+  const L = cell.item.level;
+  if (L >= 24) return false;
+  if (mergeResultCap != null && L + 1 > mergeResultCap) return false;
+  return true;
+}
+
+/**
+ * Pick a merge pair matching **player** rules: any two unlocked plants with same level/type may merge (fly across the board).
+ * Lowest tier first, then deterministic (smaller source index, then target).
+ */
+function findBestAutoMergePair(
+  grid: BoardCell[],
+  mergeResultCap: number | null,
+  excludeCells?: ReadonlySet<number>
+): { sourceIdx: number; targetIdx: number } | null {
+  let minTier = Infinity;
+  for (let i = 0; i < grid.length; i++) {
+    for (let j = i + 1; j < grid.length; j++) {
+      if (!canAutoMergePlantPair(grid, i, j, mergeResultCap, excludeCells)) continue;
+      const L = grid[i].item!.level;
+      if (L < minTier) minTier = L;
+    }
+  }
+  if (minTier === Infinity) return null;
+
+  let bestA = -1;
+  let bestB = -1;
+  for (let i = 0; i < grid.length; i++) {
+    if (grid[i].item?.level !== minTier) continue;
+    for (let j = i + 1; j < grid.length; j++) {
+      if (!canAutoMergePlantPair(grid, i, j, mergeResultCap, excludeCells)) continue;
+      if (grid[j].item!.level !== minTier) continue;
+      if (bestA < 0 || i < bestA || (i === bestA && j < bestB)) {
+        bestA = i;
+        bestB = j;
+      }
+    }
+  }
+  if (bestA < 0) return null;
+  return { sourceIdx: bestA, targetIdx: bestB };
+}
+
+/** Wait after seed impact or merge settle before running auto-merge scan. */
+const AUTO_MERGE_POST_SETTLE_MS = 500;
+/** Second full-board scan after a programmatic merge (catches another pair if the first try was early or state was still settling). */
+const AUTO_MERGE_POST_MERGE_FOLLOWUP_MS = AUTO_MERGE_POST_SETTLE_MS + 120;
+const AUTO_MERGE_POLL_MS = 320;
+/** When the primary scan finds no pair, retry after this delay (transient mid-merge / React commit timing). Up to 2 passes per “empty” streak. */
+const AUTO_MERGE_NULL_BACKUP_MS = 500;
+/** Auto-merge must not start until this long after a plant lands from a seed, if that plant is part of the chosen pair. */
+const AUTO_MERGE_SEED_INVOLVED_GRACE_MS = 1000;
+
+function autoMergeSeedGraceRemainMsForPair(
+  sourceIdx: number,
+  targetIdx: number,
+  now: number,
+  landMap: ReadonlyMap<number, number>
+): number {
+  let remain = 0;
+  for (const idx of [sourceIdx, targetIdx]) {
+    const ts = landMap.get(idx);
+    if (ts != null) remain = Math.max(remain, AUTO_MERGE_SEED_INVOLVED_GRACE_MS - (now - ts));
+  }
+  return remain;
+}
+
 export default function App() {
   // Loading screen state
   const [isLoading, setIsLoading] = useState(true);
@@ -689,6 +805,7 @@ export default function App() {
   const [pendingOfferHighlightId, setPendingOfferHighlightId] = useState<string | null>(null);
   // Pause menu (opened from settings/gear button)
   const [pauseMenuOpen, setPauseMenuOpen] = useState(false);
+  const [autoMergeSetting, setAutoMergeSetting] = useState(() => getAutoMergeMode());
   /** Uncollected offline surplus (persistent); also drives save version for popup. */
   const pendingOfflineEarningsRef = useRef(0);
   /** Synced to offline earnings popup display amount (for reliable collect payout). */
@@ -786,6 +903,20 @@ export default function App() {
   const [activeProjectiles, setActiveProjectiles] = useState<ProjectileData[]>([]);
   const activeProjectilesRef = useRef<ProjectileData[]>([]);
   activeProjectilesRef.current = activeProjectiles;
+  const hexBoardRef = useRef<HexBoardHandle>(null);
+  const autoMergeRecheckTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Absolute timestamp (Date.now()) for the next scheduled tryStart; coalesces so a later schedule() never cancels an earlier retry. */
+  const nextAutoMergeTryAtRef = useRef<number | null>(null);
+  /** Cell index → time a seed-planted crop landed (for 1s merge grace when that plant is in the pair). */
+  const recentSeedLandTimesRef = useRef<Map<number, number>>(new Map());
+  /** After a null-pair scan, arm one “wave” of two delayed retries (poll would exhaust a counter before delays fire). */
+  const autoMergeNullBackupWaveArmedRef = useRef(false);
+  const scheduleAutoMergeRecheckRef = useRef<(delayMs: number) => void>(() => {});
+  /** Batches simultaneous seed impacts into one setGrid (double seeds landing same frame). */
+  const pendingProjectileCropSpawnsRef = useRef<Map<number, number>>(new Map());
+  const projectileCropSpawnFlushScheduledRef = useRef(false);
+  const tryStartAutoMergeRef = useRef<() => void>(() => {});
+  const prevAutoMergeCapRef = useRef<number | null | undefined>(undefined);
   const wildGrowthAccumMsRef = useRef(0);
   const applyWildGrowthSpawnAtCellRef = useRef<(targetIdx: number, plantLevel: number) => void>(() => {});
   const [impactCellIdx, setImpactCellIdx] = useState<number | null>(null);
@@ -2465,6 +2596,7 @@ export default function App() {
     setGrid(prev => {
       const newGrid = [...prev];
       if (newGrid[index] && newGrid[index].item === null) {
+        recentSeedLandTimesRef.current.set(index, Date.now());
         newGrid[index] = {
           ...newGrid[index],
           item: {
@@ -2480,8 +2612,54 @@ export default function App() {
     setTimeout(() => setImpactCellIdx(null), 500);
   }, []);
 
+  const flushPendingProjectileCropSpawns = useCallback(() => {
+    projectileCropSpawnFlushScheduledRef.current = false;
+    const pending = pendingProjectileCropSpawnsRef.current;
+    if (pending.size === 0) return;
+    const entries = Array.from(pending.entries());
+    pending.clear();
+    setGrid((prev) => {
+      let next = [...prev];
+      let changed = false;
+      for (const [index, plantLevel] of entries) {
+        const cell = next[index];
+        if (cell && cell.item === null) {
+          recentSeedLandTimesRef.current.set(index, Date.now());
+          next[index] = {
+            ...cell,
+            item: {
+              id: Math.random().toString(36).slice(2, 11),
+              level: plantLevel,
+              type: 'CROP',
+            },
+          };
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    const lastIdx = entries[entries.length - 1]![0];
+    setImpactCellIdx(lastIdx);
+    setTimeout(() => setImpactCellIdx(null), 500);
+    scheduleAutoMergeRecheckRef.current(AUTO_MERGE_POST_SETTLE_MS);
+  }, []);
+
+  const queueSpawnCropFromProjectile = useCallback(
+    (index: number, plantLevel: number) => {
+      pendingProjectileCropSpawnsRef.current.set(index, plantLevel);
+      if (!projectileCropSpawnFlushScheduledRef.current) {
+        projectileCropSpawnFlushScheduledRef.current = true;
+        queueMicrotask(() => {
+          flushPendingProjectileCropSpawns();
+        });
+      }
+    },
+    [flushPendingProjectileCropSpawns]
+  );
+
   const applyWildGrowthSpawnAtCell = useCallback((targetIdx: number, plantLevel: number) => {
     spawnCropAt(targetIdx, plantLevel);
+    queueMicrotask(() => scheduleAutoMergeRecheckRef.current(AUTO_MERGE_POST_SETTLE_MS));
     requestAnimationFrame(() => {
       const hexEl = document.getElementById(`hex-${targetIdx}`);
       if (!hexEl) return;
@@ -2715,26 +2893,28 @@ export default function App() {
         const luckyProcs = luckyChancePct > 0 && Math.random() * 100 < luckyChancePct;
 
         const usedTargets = new Set<number>([targetIdx]);
-        const pickNextTarget = (): number => {
+        const pickNextTarget = (): number | null => {
           const cand = emptyIndices.filter((i) => !usedTargets.has(i));
-          if (cand.length > 0) {
-            const pick = cand[Math.floor(Math.random() * cand.length)];
-            usedTargets.add(pick);
-            return pick;
-          }
-          return targetIdx;
+          if (cand.length === 0) return null;
+          const pick = cand[Math.floor(Math.random() * cand.length)];
+          usedTargets.add(pick);
+          return pick;
         };
 
         let staggerMs = 50;
         if (doubleProcs) {
           const t2 = pickNextTarget();
-          window.setTimeout(() => spawnProjectile(t2, seedLevel), staggerMs);
-          staggerMs += 50;
+          if (t2 != null) {
+            window.setTimeout(() => spawnProjectile(t2, seedLevel), staggerMs);
+            staggerMs += 50;
+          }
         }
         if (luckyProcs) {
           const bonusLevel = Math.min(24, Math.max(1, seedLevel + 1));
           const t3 = pickNextTarget();
-          window.setTimeout(() => spawnProjectile(t3, bonusLevel, false, true), staggerMs);
+          if (t3 != null) {
+            window.setTimeout(() => spawnProjectile(t3, bonusLevel, false, true), staggerMs);
+          }
         }
       }
       return;
@@ -3437,6 +3617,153 @@ export default function App() {
       }
     }
   };
+
+  const clearAutoMergeRecheckTimeoutOnly = useCallback(() => {
+    if (autoMergeRecheckTimeoutRef.current != null) {
+      window.clearTimeout(autoMergeRecheckTimeoutRef.current);
+      autoMergeRecheckTimeoutRef.current = null;
+    }
+  }, []);
+
+  const clearAutoMergeRecheckTimeout = useCallback(() => {
+    clearAutoMergeRecheckTimeoutOnly();
+    nextAutoMergeTryAtRef.current = null;
+  }, [clearAutoMergeRecheckTimeoutOnly]);
+
+  const scheduleAutoMergeRecheck = useCallback(
+    (delayMs: number) => {
+      const wantAt = Date.now() + delayMs;
+      const existing = nextAutoMergeTryAtRef.current;
+      if (existing != null && wantAt >= existing) {
+        return;
+      }
+      clearAutoMergeRecheckTimeoutOnly();
+      nextAutoMergeTryAtRef.current = wantAt;
+      autoMergeRecheckTimeoutRef.current = window.setTimeout(() => {
+        autoMergeRecheckTimeoutRef.current = null;
+        nextAutoMergeTryAtRef.current = null;
+        tryStartAutoMergeRef.current();
+      }, Math.max(0, wantAt - Date.now()));
+    },
+    [clearAutoMergeRecheckTimeoutOnly]
+  );
+
+  const tryStartAutoMerge = useCallback(() => {
+    if (!autoMergeSetting || !getAutoMergeMode()) return;
+    if (isLoading) return;
+    if (activeFtueStage !== null || ftue11StartQueued) return;
+    // Never merge while Settings is open (user should see the board when merges run).
+    if (pauseMenuOpen) return;
+    // Intentionally allow auto-merge while discovery / level-up are open so merge chains do not stall
+    // (e.g. L2+L2→L3 opens discovery while two L1 pairs are still on the board).
+    if (offlineEarningsUi?.open) return;
+    if (showFakeAd) return;
+    if (purchaseSuccessfulUi) return;
+    if (limitedOfferPopup?.isVisible) return;
+    if (plantInfoPopup?.isVisible) return;
+    if (activeScreen !== 'FARM') return;
+    // Board is always mounted on the farm column; merges must not depend on upgrade tab or panel height.
+    if (dragState != null) return;
+    const now = Date.now();
+    const landMap = recentSeedLandTimesRef.current;
+    for (const [idx, ts] of [...landMap]) {
+      if (now - ts > AUTO_MERGE_SEED_INVOLVED_GRACE_MS + 2000) landMap.delete(idx);
+    }
+    const snap = gridRef.current;
+    const pendingImpact = getPendingSeedImpactTargets(snap, activeProjectilesRef.current);
+    const mergeCap = getActiveOrderMergeResultCap(goalPlantTypes, goalSlots, goalCounts);
+    const pair = findBestAutoMergePair(snap, mergeCap, pendingImpact);
+    if (!pair) {
+      if (!autoMergeNullBackupWaveArmedRef.current) {
+        autoMergeNullBackupWaveArmedRef.current = true;
+        window.setTimeout(() => tryStartAutoMergeRef.current(), AUTO_MERGE_NULL_BACKUP_MS);
+        window.setTimeout(() => {
+          tryStartAutoMergeRef.current();
+          autoMergeNullBackupWaveArmedRef.current = false;
+        }, AUTO_MERGE_NULL_BACKUP_MS * 2);
+      }
+      return;
+    }
+    autoMergeNullBackupWaveArmedRef.current = false;
+    const graceRemain = autoMergeSeedGraceRemainMsForPair(pair.sourceIdx, pair.targetIdx, now, landMap);
+    if (graceRemain > 0) {
+      scheduleAutoMergeRecheck(graceRemain);
+      return;
+    }
+    const ok =
+      hexBoardRef.current?.beginProgrammaticMerge(pair.sourceIdx, pair.targetIdx, snap) ?? false;
+    if (!ok) scheduleAutoMergeRecheck(280);
+  }, [
+    autoMergeSetting,
+    isLoading,
+    activeFtueStage,
+    ftue11StartQueued,
+    pauseMenuOpen,
+    offlineEarningsUi?.open,
+    showFakeAd,
+    purchaseSuccessfulUi,
+    limitedOfferPopup?.isVisible,
+    plantInfoPopup?.isVisible,
+    activeScreen,
+    dragState,
+    goalPlantTypes,
+    goalSlots,
+    goalCounts,
+    scheduleAutoMergeRecheck,
+  ]);
+
+  useEffect(() => {
+    tryStartAutoMergeRef.current = tryStartAutoMerge;
+  }, [tryStartAutoMerge]);
+
+  useEffect(() => {
+    scheduleAutoMergeRecheckRef.current = scheduleAutoMergeRecheck;
+  }, [scheduleAutoMergeRecheck]);
+
+  /** When open orders change the merge-result cap, retry (e.g. goal completed → can merge higher again). */
+  useEffect(() => {
+    const cap = getActiveOrderMergeResultCap(goalPlantTypes, goalSlots, goalCounts);
+    if (prevAutoMergeCapRef.current === cap) return;
+    prevAutoMergeCapRef.current = cap;
+    if (!autoMergeSetting || !getAutoMergeMode()) return;
+    if (pauseMenuOpen || isLoading) return;
+    scheduleAutoMergeRecheck(0);
+  }, [goalPlantTypes, goalSlots, goalCounts, autoMergeSetting, pauseMenuOpen, isLoading, scheduleAutoMergeRecheck]);
+
+  useEffect(() => {
+    if (!autoMergeSetting) return;
+    const id = window.setInterval(() => tryStartAutoMergeRef.current(), AUTO_MERGE_POLL_MS);
+    return () => clearInterval(id);
+  }, [autoMergeSetting, activeFtueStage, isLoading, activeScreen, pauseMenuOpen]);
+
+  /** Any grid mutation re-arms a merge attempt (debounced) so we never “miss” a pair after merges/seeds settle. */
+  useEffect(() => {
+    if (!autoMergeSetting || !getAutoMergeMode()) return;
+    if (isLoading) return;
+    const id = window.setTimeout(() => tryStartAutoMergeRef.current(), 400);
+    return () => window.clearTimeout(id);
+  }, [grid, autoMergeSetting, isLoading]);
+
+  /** Cancel delayed rechecks while Settings is open; when it closes (or load finishes), try once so merges can start. */
+  useEffect(() => {
+    if (isLoading) return;
+    if (pauseMenuOpen) {
+      clearAutoMergeRecheckTimeout();
+      return;
+    }
+    if (!autoMergeSetting || !getAutoMergeMode()) return;
+    scheduleAutoMergeRecheck(0);
+  }, [pauseMenuOpen, autoMergeSetting, isLoading, clearAutoMergeRecheckTimeout, scheduleAutoMergeRecheck]);
+
+  useEffect(() => () => clearAutoMergeRecheckTimeout(), [clearAutoMergeRecheckTimeout]);
+
+  const onProgrammaticMergeSettled = useCallback(() => {
+    // Full-board scan after settle; extra delayed tries drain multiple same-tier merges (e.g. two L1+L1 before L2+L2).
+    scheduleAutoMergeRecheck(AUTO_MERGE_POST_SETTLE_MS);
+    window.setTimeout(() => tryStartAutoMergeRef.current(), AUTO_MERGE_POST_MERGE_FOLLOWUP_MS);
+    window.setTimeout(() => tryStartAutoMergeRef.current(), AUTO_MERGE_POST_MERGE_FOLLOWUP_MS + 280);
+    window.setTimeout(() => tryStartAutoMergeRef.current(), AUTO_MERGE_POST_MERGE_FOLLOWUP_MS + 600);
+  }, [scheduleAutoMergeRecheck]);
 
   // Swap plants when dropping on a non-mergeable plant
   const handleSwap = useCallback((sourceIdx: number, targetIdx: number) => {
@@ -4436,6 +4763,7 @@ export default function App() {
                 {/* Reduced height from 340px to 323px (5% smaller); pointer-events-none so taps on background close upgrade panel */}
                 <div className="relative w-full flex items-center justify-center h-[323px] overflow-visible pointer-events-none" style={{ marginBottom: '35px' }}>
                   <HexBoard
+                    ref={hexBoardRef}
                     isActive={activeTab === 'CROPS' && isExpanded}
                     grid={grid}
                     onMerge={handleMerge}
@@ -4470,6 +4798,7 @@ export default function App() {
                     onMaxTierMergeAttempt={(staticCellIdx) => {
                       spawnMaxPlantReachedToast(staticCellIdx);
                     }}
+                    onProgrammaticMergeSettled={onProgrammaticMergeSettled}
                     onMergeImpactStart={(cellIdx, px, py, mergeResultLevel) => {
                       const container = containerRef.current;
                       if (!container) return;
@@ -5490,6 +5819,10 @@ export default function App() {
                       }
                       return q;
                     });
+                    queueMicrotask(() => {
+                      tryStartAutoMergeRef.current();
+                      scheduleAutoMergeRecheckRef.current(0);
+                    });
                   }}
                   level={levelUpPopup.level}
                   title={unlockInfo.title}
@@ -5530,7 +5863,14 @@ export default function App() {
             {discoveryPopup && (
               <DiscoveryPopup
                 isVisible={discoveryPopup.isVisible}
-                onClose={() => { lastOtherPopupClosedAtRef.current = Date.now(); setDiscoveryPopup(null); }}
+                onClose={() => {
+                  lastOtherPopupClosedAtRef.current = Date.now();
+                  setDiscoveryPopup(null);
+                  queueMicrotask(() => {
+                    tryStartAutoMergeRef.current();
+                    scheduleAutoMergeRecheckRef.current(0);
+                  });
+                }}
                 title="New Discovery"
                 imageSrc={assetPath(`/assets/plants/plant_${Math.max(1, Math.min(24, discoveryPopup.level))}.png`)}
                 imageLevel={discoveryPopup.level}
@@ -5841,6 +6181,7 @@ export default function App() {
             {/* Pause Menu - opened from settings/gear; Rewarded Ad = gift offer + close, Level Up = +1 goal XP (does not close) */}
             <PauseMenuPopup
               isVisible={pauseMenuOpen}
+              onAutoMergeChange={setAutoMergeSetting}
               onClose={() => {
                 setPauseMenuOpen(false);
                 const plantLevelToDiscover = discoveryLevelAfterPauseCloseRef.current;
@@ -6012,7 +6353,7 @@ export default function App() {
                   const g = gridRef.current;
                   const cell = g?.[targetIdx];
                   if (cell && cell.item === null) {
-                    spawnCropAt(targetIdx, p.plantLevel);
+                    queueSpawnCropFromProjectile(targetIdx, p.plantLevel);
                   } else {
                     setGrid(prev => {
                       const next = [...prev];
@@ -6022,6 +6363,7 @@ export default function App() {
                     });
                     setImpactCellIdx(targetIdx);
                     setTimeout(() => setImpactCellIdx(null), 500);
+                    scheduleAutoMergeRecheck(AUTO_MERGE_POST_SETTLE_MS);
                   }
                   const hexEl = document.getElementById(`hex-${targetIdx}`);
                   if (hexEl) {
@@ -6034,7 +6376,7 @@ export default function App() {
                   return;
                 }
                 // Normal seed: spawn plant and optional seed-quality beam
-                spawnCropAt(targetIdx, p.plantLevel);
+                queueSpawnCropFromProjectile(targetIdx, p.plantLevel);
                 const hexEl = document.getElementById(`hex-${targetIdx}`);
                 if (hexEl) {
                   const r = hexEl.getBoundingClientRect();
