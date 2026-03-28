@@ -46,8 +46,10 @@ export interface CoinPanelData {
   hoverX: number;
   hoverY: number;
   moveToWalletDelayMs: number;
-  /** Optional extra size multiplier (e.g. seed surplus panels) */
+  /** Optional extra size multiplier (e.g. seed surplus panels, merge coin harvest) */
   scale?: number;
+  /** Optional rectangle panel background (default cream). Merge coin harvest uses yellow. */
+  panelBg?: string;
 }
 
 interface CoinPanelProps {
@@ -84,7 +86,8 @@ export const CoinPanel: React.FC<CoinPanelProps> = ({
   const [sizeScale, setSizeScale] = useState({ w: 0, h: 0.5 });
   const [contentScale, setContentScale] = useState(0);
   const [contentOpacity, setContentOpacity] = useState(0);
-  const [bgColor, setBgColor] = useState(PANEL_BG);
+  const panelBgResolved = data.panelBg ?? PANEL_BG;
+  const [bgColor, setBgColor] = useState(panelBgResolved);
   const [isCircle, setIsCircle] = useState(false);
   const [trail, setTrail] = useState<{ p: Point; color: string }[]>([]);
   const [trailOpacity, setTrailOpacity] = useState(1);
@@ -107,7 +110,8 @@ export const CoinPanel: React.FC<CoinPanelProps> = ({
 
   useEffect(() => {
     startTimeRef.current = Date.now();
-  }, [data.id]);
+    setBgColor(data.panelBg ?? PANEL_BG);
+  }, [data.id, data.panelBg]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -158,7 +162,7 @@ export const CoinPanel: React.FC<CoinPanelProps> = ({
           setPhase('moveToWallet');
           moveStartRef.current = now;
           moveStartPosRef.current = { x: currentX, y: currentY };
-          trailRef.current = [{ p: { x: currentX, y: currentY }, color: PANEL_BG }];
+          trailRef.current = [{ p: { x: currentX, y: currentY }, color: panelBgResolved }];
         }
         setSizeScale({ w: 1, h: 1 });
         setContentScale(1);
@@ -179,8 +183,8 @@ export const CoinPanel: React.FC<CoinPanelProps> = ({
         const y = (1 - eased) * (1 - eased) * start.y + 2 * (1 - eased) * eased * controlY + eased * eased * target.y;
         setPos({ x, y });
 
-        // Color: fade from panel (white) to yellow over full 100% of travel
-        const currentColor = lerpHex(PANEL_BG, CIRCLE_BG, t);
+        // Color: fade from panel fill to coin circle yellow over full travel
+        const currentColor = lerpHex(panelBgResolved, CIRCLE_BG, t);
         setBgColor(currentColor);
 
         // First 20%: shrink to circle, fade content

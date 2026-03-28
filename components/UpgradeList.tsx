@@ -235,7 +235,7 @@ const SEEDS_UPGRADES: UpgradeDef[] = [
 const SEEDS_UNLOCK_LEVELS: Record<string, number> = {
   seed_production: 1,
   seed_storage: 2, // Storage Capacity: unlocks at level 2
-  double_seeds: 5,
+  double_seeds: 4,
   bonus_seeds: 8,
 };
 
@@ -250,7 +250,7 @@ const CROPS_UNLOCK_LEVELS: Record<string, number> = {
 const HARVEST_UNLOCK_LEVELS: Record<string, number> = {
   customer_speed: 1,
   seed_surplus: 3,
-  market_value: 7,
+  market_value: 6,
   happy_customer: 10,
 };
 
@@ -288,7 +288,7 @@ export const UPGRADE_COST_TIER_BY_ID: Record<string, UpgradeCostTier> = {
 };
 
 /** Upgrade cost formula: base = round(avgGoalValue × unlockLevel × strength × scale), then each purchase = round(previous × UPGRADE_GROWTH_MULTIPLIER). All to nearest 5.
- * Garden Expansion + Crop Yield: first = round(1500 × unlockLevel × tierStrength / highTierStrength), then each = previous × 3.0 (same shape as before for high tier).
+ * Garden Expansion + Crop Yield: first = round(anchor × unlockLevel × tierStrength / highTierStrength) (Garden anchor 500 → 1000 at unlock 2; Crop Yield anchor 1500), then each = previous × 3.0.
  */
 const AVG_GOAL_VALUE = 50;
 const UPGRADE_COST_SCALE = 1.5;
@@ -308,7 +308,7 @@ const getUpgradeCostStrength = (upgradeId: string): number => {
  * Calculate upgrade cost for the next purchase (currentLevel = level before buying).
  * baseUpgradeCost = round(avgGoalValue × unlockLevel × strength × scale) to nearest 5.
  * Then for each purchase after: nextUpgradeCost = round(previous × UPGRADE_GROWTH_MULTIPLIER) to nearest 5.
- * Garden Expansion + Crop Yield: first cost uses 1500×unlock anchor scaled by tier (high matches legacy 1500×unlock), then ×3.0 per level.
+ * Garden Expansion + Crop Yield: first cost uses per-upgrade anchor × unlock (plot_expansion: 500×unlockLevel, 1000 at level 2), then ×3.0 per level.
  * This is the only cost used by the upgrade panel and handleUpgrade.
  */
 const calculateUpgradeCost = (upgradeId: string, currentLevel: number): number => {
@@ -319,7 +319,8 @@ const calculateUpgradeCost = (upgradeId: string, currentLevel: number): number =
 
   if (upgradeId === 'plot_expansion' || upgradeId === 'crop_value') {
     const highAnchor = UPGRADE_COST_STRENGTH.high;
-    let cost = roundToNearest5((1500 * unlockLevel * strength) / highAnchor);
+    const anchorBase = upgradeId === 'plot_expansion' ? 500 : 1500;
+    let cost = roundToNearest5((anchorBase * unlockLevel * strength) / highAnchor);
     for (let i = 0; i < currentLevel; i++) {
       cost = roundToNearest5(cost * 3.0);
     }
@@ -339,10 +340,10 @@ export const getLevelUnlockInfo = (level: number): { title: string; description:
   const allUnlocks: { level: number; upgradeId: string; tab: TabType; name: string; description: string; icon: string; popupDescription?: string }[] = [
     { level: 2, upgradeId: 'plot_expansion', tab: 'CROPS', name: 'Garden Expansion', description: 'Unlock additional plots in the garden', icon: 'icon_plotexpansion.png', popupDescription: 'You can now unlock additional plots in the garden' },
     { level: 3, upgradeId: 'seed_surplus', tab: 'HARVEST', name: 'Surplus Recharges', description: 'Increase coins gained from extra seed and harvest recharges', icon: 'icon_seedsurplus.png', popupDescription: 'Increase coins gained from extra seed and harvest recharges' },
-    { level: 4, upgradeId: '', tab: 'HARVEST', name: 'Extra Orders', description: 'You can now recieve up to 4 orders at a time', icon: 'icon_extracustomer.png', popupDescription: 'You can now recieve up to 4 orders at a time' },
-    { level: 5, upgradeId: 'double_seeds', tab: 'SEEDS', name: 'Double Seeds', description: 'Increase chance to spawn 2 seeds at a time', icon: 'icon_seedquality.png', popupDescription: 'Increase chance to spawn 2 seeds at a time' },
-    { level: 6, upgradeId: 'wild_growth', tab: 'CROPS', name: 'Wild Growth', description: 'Plants automatically duplicate over time', icon: 'icon_luckymerge.png', popupDescription: 'Plants in your garden will now automatically duplicate over time' },
-    { level: 7, upgradeId: 'market_value', tab: 'HARVEST', name: 'Market Value', description: 'Increase the coins earned when completing orders', icon: 'icon_marketvalue.png' },
+    { level: 4, upgradeId: 'double_seeds', tab: 'SEEDS', name: 'Double Seeds', description: 'Increase chance to spawn 2 seeds at a time', icon: 'icon_seedquality.png', popupDescription: 'Increase chance to spawn 2 seeds at a time' },
+    { level: 5, upgradeId: 'wild_growth', tab: 'CROPS', name: 'Wild Growth', description: 'Plants automatically duplicate over time', icon: 'icon_luckymerge.png', popupDescription: 'Plants in your garden will now automatically duplicate over time' },
+    { level: 6, upgradeId: 'market_value', tab: 'HARVEST', name: 'Market Value', description: 'Increase the coins earned when completing orders', icon: 'icon_marketvalue.png', popupDescription: 'You can now increase the coins earned when completing orders' },
+    { level: 7, upgradeId: '', tab: 'HARVEST', name: 'Extra Orders', description: 'You can now recieve up to 4 orders at a time', icon: 'icon_extracustomer.png', popupDescription: 'You can now recieve up to 4 orders at a time' },
     { level: 8, upgradeId: 'bonus_seeds', tab: 'SEEDS', name: 'Lucky Seed', description: 'Increase chance to produce a bonus higher level seed', icon: 'icon_luckyseed.png', popupDescription: 'Seeds now have a chance to produce an extra higher level plant' },
     { level: 9, upgradeId: 'crop_value', tab: 'CROPS', name: 'Crop Yield', description: 'Increase how many crops your plants produce when harvesting', icon: 'icon_cropvalue.png', popupDescription: 'You can now increase how many crops your plants produce when harvesting' },
     { level: 10, upgradeId: 'happy_customer', tab: 'HARVEST', name: 'Happy Customers', description: 'Increase chance that customers pay double for orders', icon: 'icon_happycustomer.png', popupDescription: 'You can now increase the chance for customers to pay double coins for orders' },

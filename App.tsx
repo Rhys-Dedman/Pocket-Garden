@@ -93,9 +93,12 @@ export function getCoinValueForLevel(level: number): number {
   return getPlantCoinValue(level);
 }
 
-/** Max plant goal slots: 3 until level 4, then 4. Slot 4 (5th) is reserved for coin goal only. */
+/** Max plant goal slots: 3 until level 7 (Extra Orders), then 4. Slot 4 (5th) is reserved for coin goal only. */
 const getMaxGoalSlots = (playerLevel: number): number =>
-  playerLevel >= 4 ? 4 : 3;
+  playerLevel >= 7 ? 4 : 3;
+
+/** Merge with no matching goal: coin panel uses seed-surplus scale (default cream panel bg). */
+const MERGE_COIN_HARVEST_PANEL_SCALE = 1.5;
 
 /** Goals required to level up. Level 1→2: 7; then each level = round(previous × 1.35) */
 const getGoalsRequiredForLevel = (level: number): number => {
@@ -374,14 +377,14 @@ const pickGoalPlantLevel = (
   return pickRandomWithVariety();
 };
 
-/** Crops required for goal order. Scales with player level, crop yield, and has random variation. +1 base crops each 4 player levels (at 4, 8, 12, …). */
+/** Crops required for goal order. Scales with player level (every 4 levels), crop yield, and has random variation. */
 const getGoalCropRequired = (
   playerLevel: number,
   cropYieldLevel: number,
   goalDifficultyScaling: number = GOAL_DIFFICULTY_SCALING
 ): number => {
   const baseGoal =
-    3 + Math.floor(playerLevel / 1) + Math.floor(cropYieldLevel * 0.5) + Math.floor(playerLevel / 4);
+    3 + Math.floor(cropYieldLevel * 0.5) + Math.floor(playerLevel / 4);
   const variationRange = 1 + Math.floor(playerLevel / 10);
   const randomOffset = Math.floor(Math.random() * (2 * variationRange + 1)) - variationRange;
   const variedGoal = baseGoal + randomOffset;
@@ -719,7 +722,7 @@ export default function App() {
   const [seenMasteryUnlockLevels, setSeenMasteryUnlockLevels] = useState<number[]>([]);
   const [barnAttentionBounceLevels, setBarnAttentionBounceLevels] = useState<number[]>([]);
   const [unlockingCellIndices, setUnlockingCellIndices] = useState<number[]>([]); // Cells currently playing unlock animation
-  // Goals: 3 slots initially; unlock 4th plant goal at level 5. Slot 4 (5th) is coin goal only.
+  // Goals: 3 slots until player level 7 (Extra Orders unlock); then 4 plant goal slots. Slot 4 (5th) is coin goal only.
   const [goalSlots, setGoalSlots] = useState<('empty' | 'loading' | 'green' | 'completed')[]>(['green', 'green', 'green', 'empty', 'empty']);
   const [goalPlantTypes, setGoalPlantTypes] = useState<number[]>([1, 2, 3, 0, 0]); // plant level 1-5 per slot when green
   const goalSlotsRef = useRef(goalSlots);
@@ -3110,8 +3113,6 @@ export default function App() {
     const plantPanelsWithDist: { panel: PlantPanelData; dist: number }[] = [];
     /** Chain harvest (merge-adjacent): always 1 crop toward goals; no crop yield, no double-harvest ad */
     const mergeHarvestCropAmount = 1;
-    const surplusMultiplier = getSurplusSalesMultiplier(harvestState);
-    const surplusSalesUnlocked = isSurplusSalesUnlocked(harvestState, playerLevel);
     const allocated: Record<number, number> = {};
     const inFlightAtStartMerge: Record<number, number> = { ...goalInFlightHarvestBySlotRef.current };
 
@@ -3153,7 +3154,6 @@ export default function App() {
           })()
         : -1;
       const hasGoalForPlant = slotIdx >= 0;
-      if (!hasGoalForPlant && !surplusSalesUnlocked) return;
 
       const hexEl = document.getElementById(`hex-${cellIdx}`);
       if (!hexEl) return;
@@ -3192,11 +3192,10 @@ export default function App() {
           },
         });
       } else {
-        const baseValue = getCoinValueForLevel(level);
-        let value = baseValue;
+        let value = getCoinValueForLevel(level);
         if (cell.fertile) value *= 2;
-        value = Math.floor(value * surplusMultiplier);
-        /* no double_harvest ad on chain harvest */
+        value = Math.floor(value);
+        /* Coin panel → wallet when no goal; base tier value only (no Surplus Sales multiplier). */
         value = applyDoubleCoinsVisualAmount(value, activeBoostsRef.current);
         const dist = Math.hypot(hoverX - walletCenterX, hoverY - walletCenterY);
         coinPanelsWithDist.push({
@@ -3209,6 +3208,7 @@ export default function App() {
             hoverX,
             hoverY,
             moveToWalletDelayMs: 0,
+            scale: MERGE_COIN_HARVEST_PANEL_SCALE,
           },
         });
       }
@@ -4501,8 +4501,7 @@ export default function App() {
                             })()
                           : -1;
                         const hasGoalForPlant = slotIdx >= 0;
-                        const surplusSalesUnlocked = isSurplusSalesUnlocked(harvestState, playerLevel);
-                        /** Merge result cell auto-harvest: 1 crop only; no crop yield / double-harvest ad */
+                        /** Merge result cell: 1 crop to goal if any; else coin panel → wallet (base coin value for merged tier). */
                         const harvestAmount = 1;
                         const hexEl = document.getElementById(`hex-${cellIdx}`);
                         const panelHeightPx = 14;
@@ -4532,13 +4531,12 @@ export default function App() {
                               ...(activeFtueStage === 'first_harvest' ? { visualScale: 2 } : {}),
                             },
                           ]);
-                        } else if (surplusSalesUnlocked) {
+                        } else {
                           const cell = grid[cellIdx];
-                          let baseValue = getCoinValueForLevel(mergeResultLevel);
-                          if (cell?.fertile) baseValue *= 2;
-                          const surplusMultiplier = getSurplusSalesMultiplier(harvestState);
-                          let value = Math.floor(baseValue * surplusMultiplier);
-                          /* no double_harvest ad on merge-impact surplus */
+                          let value = getCoinValueForLevel(mergeResultLevel);
+                          if (cell?.fertile) value *= 2;
+                          value = Math.floor(value);
+                          /* Same coin panel + wallet path as surplus harvest; no Surplus Sales multiplier. */
                           value = applyDoubleCoinsVisualAmount(value, activeBoostsRef.current);
                           setActiveCoinPanels((prev) => [
                             ...prev,
@@ -4550,6 +4548,7 @@ export default function App() {
                               hoverX,
                               hoverY,
                               moveToWalletDelayMs: 0,
+                              scale: MERGE_COIN_HARVEST_PANEL_SCALE,
                             },
                           ]);
                         }
