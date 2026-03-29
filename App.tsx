@@ -18,6 +18,7 @@ import { GoalCoinParticle, GoalCoinParticleData } from './components/GoalCoinPar
 import { WalletImpactBurst } from './components/WalletImpactBurst';
 import { PageHeader, MAX_VISIBLE_BOOST_SLOTS } from './components/PageHeader';
 import { DiscoveryPopup } from './components/DiscoveryPopup';
+import { GoldenPotBonusesPopup } from './components/GoldenPotBonusesPopup';
 import { PurchaseSuccessfulPopup, type PurchaseSuccessfulRewardRow } from './components/PurchaseSuccessfulPopup';
 import { LevelUpPopup } from './components/LevelUpPopup';
 import { PlantInfoPopup } from './components/PlantInfoPopup';
@@ -48,7 +49,7 @@ import type { FtueStageId } from './ftue/ftueConfig';
 import { assetPath } from './utils/assetPath';
 import { getTickCount60, TARGET_FRAME_MS, scheduleNextFrame } from './utils/raf60';
 import { getPerformanceMode } from './utils/performanceMode';
-import { getAutoMergeMode } from './utils/autoMergeMode';
+import { getAutoMergeMode, setAutoMergeMode } from './utils/autoMergeMode';
 import {
   DOUBLE_COINS_HEADER_ICON,
   DOUBLE_COINS_OFFER_ID,
@@ -86,6 +87,12 @@ import {
   PLANT_MASTERY_ORDERS_PER_SEGMENT,
   getPlantMasteryUnlockCost,
 } from './constants/plantMastery';
+import {
+  applyGoldenPotHarvestPerMinute,
+  applyGoldenPotProductionPerMinute,
+  hasGoldenPotMergeCoinsDouble,
+  hasGoldenPotOfflineEarningsDouble,
+} from './constants/goldenPotBonuses';
 import { formatCompactNumber } from './utils/formatCompactNumber';
 import { getPlantCoinValue } from './utils/plantValue';
 
@@ -712,6 +719,7 @@ export default function App() {
   
   // Discovery popup state
   const [discoveryPopup, setDiscoveryPopup] = useState<{ isVisible: boolean; level: number } | null>(null);
+  const [goldenPotBonusesPopupOpen, setGoldenPotBonusesPopupOpen] = useState(false);
   /** Paid store purchase confirmation (IAP stub); Collect fires boost particles + activation. */
   const [purchaseSuccessfulUi, setPurchaseSuccessfulUi] = useState<{
     headerImageSrc: string;
@@ -806,6 +814,9 @@ export default function App() {
   // Pause menu (opened from settings/gear button)
   const [pauseMenuOpen, setPauseMenuOpen] = useState(false);
   const [autoMergeSetting, setAutoMergeSetting] = useState(() => getAutoMergeMode());
+  /** Skip treating 0→24 (hydrate) as “just unlocked”; only 23→24 in-session turns auto-merge on. */
+  const autoMergePotCountInitRef = useRef(true);
+  const lastGoldenPotCountForAutoMergeRef = useRef(0);
   /** Uncollected offline surplus (persistent); also drives save version for popup. */
   const pendingOfflineEarningsRef = useRef(0);
   /** Synced to offline earnings popup display amount (for reliable collect payout). */
@@ -948,8 +959,33 @@ export default function App() {
     unlockPending: [],
     unlockedLevels: [],
   });
+  const goldenPotCount = plantMastery.unlockedLevels.length;
   const [masteryPurchaseRevealLevels, setMasteryPurchaseRevealLevels] = useState<number[]>([]);
   const masteryPurchaseRevealTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const n = plantMastery.unlockedLevels.length;
+    const prev = lastGoldenPotCountForAutoMergeRef.current;
+    if (autoMergePotCountInitRef.current) {
+      autoMergePotCountInitRef.current = false;
+      lastGoldenPotCountForAutoMergeRef.current = n;
+      if (n < 24) {
+        setAutoMergeMode(false);
+        setAutoMergeSetting(false);
+      }
+      return;
+    }
+    lastGoldenPotCountForAutoMergeRef.current = n;
+    if (n < 24) {
+      setAutoMergeMode(false);
+      setAutoMergeSetting(false);
+      return;
+    }
+    if (prev === 23 && n === 24) {
+      setAutoMergeMode(true);
+      setAutoMergeSetting(true);
+    }
+  }, [plantMastery.unlockedLevels.length]);
   const skipNextBarnPendingBounceRef = useRef(false);
 
   /** One increment per collected goal — same moment as player level XP (not on plant-panel impact; avoids double-count). */
@@ -1567,6 +1603,7 @@ export default function App() {
       if (lastOfflineEarningsClosedAtRef.current > 0 && Date.now() - lastOfflineEarningsClosedAtRef.current < 10000) return;
       if (levelUpPopup?.isVisible) return;
       if (discoveryPopup?.isVisible) return;
+      if (goldenPotBonusesPopupOpen) return;
       if (purchaseSuccessfulUi) return;
       if (plantInfoPopup?.isVisible) return;
       const now = Date.now();
@@ -1591,7 +1628,7 @@ export default function App() {
         if (o.trigger === 'garden_fill_max_50') return gardenFillPercent <= 0.5;
         if (o.trigger === 'wallet_empty') return money === 0;
         if (o.trigger === 'anytime') return true;
-        if (o.trigger === 'order_speed_not_maxed') return !isCustomerSpeedMaxed(harvestState);
+        if (o.trigger === 'order_speed_not_maxed') return !isCustomerSpeedMaxed(harvestState, goldenPotCount);
         if (o.trigger === 'has_goal_available') return hasGoalAvailable;
         return false;
       });
@@ -1613,7 +1650,7 @@ export default function App() {
           if (o.trigger === 'garden_fill_max_50') return gardenFillPercent <= 0.5;
           if (o.trigger === 'wallet_empty') return money === 0;
           if (o.trigger === 'anytime') return true;
-          if (o.trigger === 'order_speed_not_maxed') return !isCustomerSpeedMaxed(harvestState);
+          if (o.trigger === 'order_speed_not_maxed') return !isCustomerSpeedMaxed(harvestState, goldenPotCount);
           if (o.trigger === 'has_goal_available') return hasGoalAvailable;
           return false;
         });
@@ -1630,7 +1667,7 @@ export default function App() {
       }
     }, 2000);
     return () => clearInterval(interval);
-  }, [playerLevel, grid, money, limitedOfferPopup?.isVisible, goalSlots, harvestState, highestPlantEver, levelUpPopup?.isVisible, discoveryPopup?.isVisible, purchaseSuccessfulUi, plantInfoPopup?.isVisible, offlineEarningsUi?.open, activeScreen]);
+  }, [playerLevel, grid, money, limitedOfferPopup?.isVisible, goalSlots, harvestState, highestPlantEver, levelUpPopup?.isVisible, discoveryPopup?.isVisible, goldenPotBonusesPopupOpen, purchaseSuccessfulUi, plantInfoPopup?.isVisible, offlineEarningsUi?.open, activeScreen, goldenPotCount]);
 
   // Derive which tabs have offers (for tab notification coloring)
   const tabsWithOffers = new Set(rewardedOffers.map(o => o.tab));
@@ -1707,7 +1744,8 @@ export default function App() {
 
   // Barn scroll: drag with momentum, moves background + shelves together
   const [barnScrollY, setBarnScrollY] = useState(0);
-  
+  const [plantCollectionViewBonusesPressed, setPlantCollectionViewBonusesPressed] = useState(false);
+
   useEffect(() => {
     const el = barnScrollRef.current;
     if (!el) return;
@@ -2049,7 +2087,8 @@ export default function App() {
     
     // Rapid Seeds boost: 15/min; otherwise 3/min..10/min linear across 9 upgrades (level 0..9)
     const hasRapidSeedsBoost = activeBoosts.some(b => b.offerId === 'rapid_seeds');
-    const perMinute = hasRapidSeedsBoost ? 15 : (3 + (7 * Math.min(9, Math.max(0, seedProductionLevel))) / 9);
+    let perMinute = hasRapidSeedsBoost ? 15 : (3 + (7 * Math.min(9, Math.max(0, seedProductionLevel))) / 9);
+    perMinute = applyGoldenPotProductionPerMinute(perMinute, goldenPotCount);
     lastSeedProgressTimeRef.current = Date.now();
     let rafId: number;
     const percentPerMs = (perMinute * 100) / (60 * 1000); // % progress per millisecond
@@ -2089,7 +2128,7 @@ export default function App() {
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [seedProductionLevel, isLoading, activeBoosts, activeFtueStage]);
+  }, [seedProductionLevel, isLoading, activeBoosts, activeFtueStage, goldenPotCount]);
 
   // Goal loading countdown: Order Speed (15s base - 1s per level, min 5). Rush Orders boost = 0s. Don't start until slot is 100% faded in.
   const goalIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -2100,7 +2139,7 @@ export default function App() {
     // Don't run countdown while slot is fading in (0→100% over 500ms)
     if (loadingIdx === goalSlotFadeInSlot) return;
     const hasRushOrdersBoost = activeBoosts.some(b => b.offerId === 'rush_orders');
-    const effectiveGoalLoadingSeconds = hasRushOrdersBoost ? 0 : getGoalLoadingSeconds(harvestState);
+    const effectiveGoalLoadingSeconds = hasRushOrdersBoost ? 0 : getGoalLoadingSeconds(harvestState, goldenPotCount);
     // Only process each loading slot once (avoids double-counting in React Strict Mode / duplicate effect runs)
     if (lastProcessedGoalLoadingSlotRef.current === loadingIdx) {
       if (goalIntervalRef.current) clearInterval(goalIntervalRef.current);
@@ -2147,7 +2186,7 @@ export default function App() {
         if (firstEmptyIdx >= 0) {
           setGoalDisplayOrder((prev) => (prev.includes(firstEmptyIdx) ? prev : [...prev, firstEmptyIdx]));
           setGoalSlotFadeInSlot(firstEmptyIdx);
-          setGoalLoadingSeconds(hasRushOrdersBoost ? 0 : getGoalLoadingSeconds(harvestState));
+          setGoalLoadingSeconds(hasRushOrdersBoost ? 0 : getGoalLoadingSeconds(harvestState, goldenPotCount));
           setTimeout(() => setGoalSlotFadeInSlot(null), 500);
         }
         setGoalTransitionSlot(null);
@@ -2201,7 +2240,7 @@ export default function App() {
             if (firstEmptyIdx >= 0) {
               setGoalDisplayOrder((prev) => (prev.includes(firstEmptyIdx) ? prev : [...prev, firstEmptyIdx]));
               setGoalSlotFadeInSlot(firstEmptyIdx);
-              setGoalLoadingSeconds(hasRushOrdersBoost ? 0 : getGoalLoadingSeconds(harvestState));
+              setGoalLoadingSeconds(hasRushOrdersBoost ? 0 : getGoalLoadingSeconds(harvestState, goldenPotCount));
               setTimeout(() => setGoalSlotFadeInSlot(null), 500);
             }
             setGoalTransitionSlot(null);
@@ -2218,7 +2257,7 @@ export default function App() {
         goalIntervalRef.current = null;
       }
     };
-  }, [isLoading, goalSlots, goalSlotFadeInSlot, harvestState, playerLevel, cropsState, activeBoosts]);
+  }, [isLoading, goalSlots, goalSlotFadeInSlot, harvestState, playerLevel, cropsState, activeBoosts, goldenPotCount]);
 
   // When player levels up and unlocks a new goal slot, start loading in that slot if empty and no other loading
   useEffect(() => {
@@ -2231,12 +2270,12 @@ export default function App() {
         setGoalSlots((s) => { const n = [...s]; n[i] = 'loading'; return n; });
         setGoalDisplayOrder((prev) => (prev.includes(i) ? prev : [...prev, i]));
         setGoalSlotFadeInSlot(i);
-        setGoalLoadingSeconds(getGoalLoadingSeconds(harvestState));
+        setGoalLoadingSeconds(getGoalLoadingSeconds(harvestState, goldenPotCount));
         setTimeout(() => setGoalSlotFadeInSlot(null), 500);
         break;
       }
     }
-  }, [playerLevel, isLoading, goalSlots, harvestState]);
+  }, [playerLevel, isLoading, goalSlots, harvestState, goldenPotCount]);
 
   // Coin goal: show after 30–60s (random) since last hide; only from level 2; repeats forever
   useEffect(() => {
@@ -2457,7 +2496,8 @@ export default function App() {
   useEffect(() => {
     if (isLoading) return;
     const hasRapidHarvestBoost = activeBoosts.some(b => b.offerId === 'rapid_harvest');
-    const perMinute = hasRapidHarvestBoost ? 15 : (3 + (7 * Math.min(9, Math.max(0, harvestSpeedLevel))) / 9);
+    let perMinute = hasRapidHarvestBoost ? 15 : (3 + (7 * Math.min(9, Math.max(0, harvestSpeedLevel))) / 9);
+    perMinute = applyGoldenPotHarvestPerMinute(perMinute, goldenPotCount);
     lastHarvestProgressTimeRef.current = Date.now();
     let rafId: number;
     const percentPerMs = (perMinute * 100) / (60 * 1000);
@@ -2503,7 +2543,7 @@ export default function App() {
     };
     rafId = scheduleNextFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [harvestSpeedLevel, isLoading, activeBoosts, activeFtueStage, ftue7Scheduled, ftueHarvestSurplusActivated, ftueSeedSurplusActivated, seedsState]);
+  }, [harvestSpeedLevel, isLoading, activeBoosts, activeFtueStage, ftue7Scheduled, ftueHarvestSurplusActivated, ftueSeedSurplusActivated, seedsState, goldenPotCount]);
 
   // Harvest tap zoom: TAP_BAR_PERCENT per tap when no charges (fast smooth zoom)
   useEffect(() => {
@@ -3378,6 +3418,7 @@ export default function App() {
         let value = getCoinValueForLevel(level);
         if (cell.fertile) value *= 2;
         value = Math.floor(value);
+        if (hasGoldenPotMergeCoinsDouble(goldenPotCount)) value *= 2;
         /* Coin panel → wallet when no goal; base tier value only (no Surplus Sales multiplier). */
         value = applyDoubleCoinsVisualAmount(value, activeBoostsRef.current);
         const dist = Math.hypot(hoverX - walletCenterX, hoverY - walletCenterY);
@@ -3448,7 +3489,7 @@ export default function App() {
 
     setHarvestBounceCellIndices(triggeredCells);
     setTimeout(() => setHarvestBounceCellIndices([]), 250);
-  }, [grid, goalSlots, goalCounts, goalPlantTypes, harvestState, playerLevel, activeFtueStage]);
+  }, [grid, goalSlots, goalCounts, goalPlantTypes, harvestState, playerLevel, activeFtueStage, goldenPotCount]);
 
   // Called by HexBoard when starting a merge to calculate level increase
   const getMergeLevelIncrease = useCallback((_currentPlantLevel: number) => {
@@ -3868,6 +3909,7 @@ export default function App() {
 
     const elapsed = Math.max(0, Date.now() - save.savedAt);
     const ftueBlocksOffline = isOfflineCoinEarningsBlockedByFtue(save);
+    const goldPotsForOffline = save.plantMasteryUnlockedLevels?.length ?? 0;
     const sim = simulateOfflineSeedHarvest({
       savedAt: save.savedAt,
       deltaMs: elapsed,
@@ -3884,6 +3926,7 @@ export default function App() {
       ftueHarvestSurplusActivated: save.ftueHarvestSurplusActivated,
       highestPlantEver: save.highestPlantEver,
       earnOfflineCoins: !ftueBlocksOffline,
+      goldenPotCount: goldPotsForOffline,
     });
     seedProgressRef.current = sim.seedProgress;
     setSeedProgress(sim.seedProgress);
@@ -3904,7 +3947,8 @@ export default function App() {
     setGrid(wildOut.grid);
 
     const pendingBank = ftueBlocksOffline ? 0 : (save.pendingOfflineEarnings ?? 0);
-    const totalOffline = pendingBank + sim.offlineSurplusCoins;
+    let totalOffline = pendingBank + sim.offlineSurplusCoins;
+    if (hasGoldenPotOfflineEarningsDouble(goldPotsForOffline)) totalOffline *= 2;
     pendingOfflineEarningsRef.current = totalOffline;
     return totalOffline;
   }, []);
@@ -4535,7 +4579,7 @@ export default function App() {
                             n[slotIdx] = 'loading';
                             setGoalDisplayOrder((prev) => (prev.includes(slotIdx) ? prev : [...prev, slotIdx]));
                             setGoalSlotFadeInSlot(slotIdx);
-                            setGoalLoadingSeconds(getGoalLoadingSeconds(harvestState));
+                            setGoalLoadingSeconds(getGoalLoadingSeconds(harvestState, goldenPotCount));
                             setTimeout(() => setGoalSlotFadeInSlot(null), 500);
                             return n;
                           }
@@ -4868,6 +4912,7 @@ export default function App() {
                           let value = getCoinValueForLevel(mergeResultLevel);
                           if (cell?.fertile) value *= 2;
                           value = Math.floor(value);
+                          if (hasGoldenPotMergeCoinsDouble(goldenPotCount)) value *= 2;
                           /* Same coin panel + wallet path as surplus harvest; no Surplus Sales multiplier. */
                           value = applyDoubleCoinsVisualAmount(value, activeBoostsRef.current);
                           setActiveCoinPanels((prev) => [
@@ -4999,6 +5044,7 @@ export default function App() {
                     ftue10GreenFlashUpgradeId={ftue10GreenFlashUpgradeId}
                     ftue10PurchaseButtonRef={ftue10PurchaseButtonRef}
                     ftue10LockScroll={activeFtueStage === 'first_upgrade' && ftue10Phase === 'finger'}
+                    goldenPotCount={goldenPotCount}
                     onUpgradePurchase={(upgradeId) => {
                       if (upgradeId === 'harvest_speed' && activeFtueStage === 'first_upgrade') {
                         // FTUE 10: on purchase, bounce Harvest button like a tap.
@@ -5129,12 +5175,12 @@ export default function App() {
                     className="absolute pointer-events-auto"
                     style={{ zIndex: 2, left: '50%', top: 170, transform: 'translateX(-50%)' }}
                   >
-                    <div className="relative" style={{ width: '300px' }}>
+                    <div className="relative" style={{ width: '320px' }}>
                       <img
                         src={assetPath('/assets/topui/ui_plantmastery.png')}
                       alt="Plant Collection"
                         style={{
-                          width: '300px',
+                          width: '320px',
                           height: 'auto',
                           maxWidth: 'none',
                         }}
@@ -5168,12 +5214,13 @@ export default function App() {
                             color: '#c2b280',
                             fontFamily: 'Inter, sans-serif',
                             fontSize: '0.875rem',
-                            paddingLeft: 8,
-                            paddingRight: 8,
+                            paddingLeft: 10,
+                            paddingRight: 10,
                             marginBottom: 8,
                           }}
                         >
-                          Complete orders to unlock golden pots for your plants!
+                          <span className="block">Complete orders to unlock golden pots.</span>
+                          <span className="block">Earn bonuses as you collect them.</span>
                         </p>
                         {/* Plant mastery: outer bar flat L/R; green fill has curved right “head” */}
                         <div className="flex items-center justify-center gap-0 w-full" style={{ marginTop: 0, marginLeft: -2 }}>
@@ -5248,12 +5295,37 @@ export default function App() {
                             />
                           </div>
                         </div>
+                        {/* Same green affordance as upgrade purchase buttons (UpgradeList unlocked row) */}
+                        <button
+                          type="button"
+                          onMouseDown={() => setPlantCollectionViewBonusesPressed(true)}
+                          onMouseUp={() => setPlantCollectionViewBonusesPressed(false)}
+                          onMouseLeave={() => setPlantCollectionViewBonusesPressed(false)}
+                          onClick={() => setGoldenPotBonusesPopupOpen(true)}
+                          className={`relative w-1/2 mx-auto flex items-center justify-center mt-2 h-8 transition-all border outline outline-1 rounded-[8px] shadow-[inset_0_1px_1px_rgba(255,255,255,0.4)] active:translate-y-[2px] active:border-b-0 active:mb-[4px]`}
+                          style={{
+                            backgroundColor: plantCollectionViewBonusesPressed ? '#61882b' : '#cae060',
+                            borderColor: plantCollectionViewBonusesPressed ? '#61882b' : '#9db546',
+                            borderBottomWidth: plantCollectionViewBonusesPressed ? '0px' : '4px',
+                            marginBottom: plantCollectionViewBonusesPressed ? '4px' : '0px',
+                            outlineColor: plantCollectionViewBonusesPressed ? '#61882b' : '#9db546',
+                          }}
+                        >
+                          <span
+                            className="text-[13px] font-black tracking-tighter"
+                            style={{
+                              color: plantCollectionViewBonusesPressed ? '#cbe05d' : '#587e26',
+                            }}
+                          >
+                            View Bonuses
+                          </span>
+                        </button>
                       </div>
                     </div>
                   </div>
 
                   {/* Shelves: Unlock pill + glow when mastery is pending purchase for that plant */}
-                  <div className="relative flex flex-col items-center" style={{ marginTop: 165 }} data-barn-shelves>
+                  <div className="relative flex flex-col items-center" style={{ marginTop: 215 }} data-barn-shelves>
                     {Array.from({ length: BARN_SHELF_COUNT }, (_, shelfIndex) => {
                       const startPlant = shelfIndex * 4 + 1;
                       return (
@@ -5860,6 +5932,23 @@ export default function App() {
             })()}
 
             {/* Discovery Popup */}
+            {goldenPotBonusesPopupOpen && (
+              <GoldenPotBonusesPopup
+                isVisible
+                goldenPotCount={plantMastery.unlockedLevels.length}
+                maxGoldenPots={24}
+                appScale={appScale}
+                onClose={() => {
+                  lastOtherPopupClosedAtRef.current = Date.now();
+                  setGoldenPotBonusesPopupOpen(false);
+                  queueMicrotask(() => {
+                    tryStartAutoMergeRef.current();
+                    scheduleAutoMergeRecheckRef.current(0);
+                  });
+                }}
+              />
+            )}
+
             {discoveryPopup && (
               <DiscoveryPopup
                 isVisible={discoveryPopup.isVisible}
@@ -6181,6 +6270,7 @@ export default function App() {
             {/* Pause Menu - opened from settings/gear; Rewarded Ad = gift offer + close, Level Up = +1 goal XP (does not close) */}
             <PauseMenuPopup
               isVisible={pauseMenuOpen}
+              showAutoMergeSetting={goldenPotCount >= 24}
               onAutoMergeChange={setAutoMergeSetting}
               onClose={() => {
                 setPauseMenuOpen(false);

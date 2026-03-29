@@ -13,6 +13,7 @@ import type { ActiveBoostData } from '../components/ActiveBoostIndicator';
 import { STORE_STARTER_PACK_COUNTDOWN_END_MS_KEY } from '../offers';
 import { normalizeBarnShelvesUnlocked } from '../constants/barnShelves';
 import { PLANT_MASTERY_ORDERS_PER_SEGMENT } from '../constants/plantMastery';
+import { AUTO_MERGE_STORAGE_KEY } from './autoMergeMode';
 
 function normalizePlantMasteryUnlockPending(raw: unknown): number[] {
   if (!Array.isArray(raw)) return [];
@@ -193,6 +194,11 @@ export function clearGameSave(): void {
   }
   try {
     localStorage.removeItem(STORE_STARTER_PACK_COUNTDOWN_END_MS_KEY);
+  } catch {
+    /* ignore */
+  }
+  try {
+    localStorage.removeItem(AUTO_MERGE_STORAGE_KEY);
   } catch {
     /* ignore */
   }

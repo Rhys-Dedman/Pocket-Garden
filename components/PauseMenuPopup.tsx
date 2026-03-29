@@ -29,6 +29,8 @@ interface PauseMenuPopupProps {
   onClearShed?: () => void;
   /** When false, Unlock Plant button is disabled (all plants unlocked) */
   canUnlockPlant?: boolean;
+  /** Auto-merge toggle only appears after the 24 golden-pot bonus is earned. */
+  showAutoMergeSetting?: boolean;
   closeOnBackdropClick?: boolean;
   appScale?: number;
 }
@@ -105,6 +107,7 @@ export const PauseMenuPopup: React.FC<PauseMenuPopupProps> = ({
   onClearShed,
   onAutoMergeChange,
   canUnlockPlant = true,
+  showAutoMergeSetting = false,
   closeOnBackdropClick = true,
   appScale = 1,
 }) => {
@@ -284,27 +287,29 @@ export const PauseMenuPopup: React.FC<PauseMenuPopupProps> = ({
                     Performance Mode {performanceMode ? 'ON' : 'OFF'}
                   </span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const next = !autoMergeMode;
-                    setAutoMergeModeLocal(next);
-                    setAutoMergeMode(next);
-                    onAutoMergeChange?.(next);
-                  }}
-                  className="relative flex items-center justify-center rounded-lg transition-all w-full"
-                  style={{
-                    height: `${SETTINGS_BUTTON_HEIGHT_PX}px`,
-                    backgroundColor: SETTINGS_PALETTES.green.bg,
-                    border: `3px solid ${SETTINGS_PALETTES.green.border}`,
-                    borderRadius: '12px',
-                    boxShadow: `0 4px 0 ${SETTINGS_PALETTES.green.border}, 0 6px 12px rgba(0,0,0,0.15)`,
-                  }}
-                >
-                  <span className="font-bold tracking-tight" style={settingsCheatLabelStyle(SETTINGS_PALETTES.green)}>
-                    Auto Merge {autoMergeMode ? 'ON' : 'OFF'}
-                  </span>
-                </button>
+                {showAutoMergeSetting ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !autoMergeMode;
+                      setAutoMergeModeLocal(next);
+                      setAutoMergeMode(next);
+                      onAutoMergeChange?.(next);
+                    }}
+                    className="relative flex items-center justify-center rounded-lg transition-all w-full"
+                    style={{
+                      height: `${SETTINGS_BUTTON_HEIGHT_PX}px`,
+                      backgroundColor: SETTINGS_PALETTES.green.bg,
+                      border: `3px solid ${SETTINGS_PALETTES.green.border}`,
+                      borderRadius: '12px',
+                      boxShadow: `0 4px 0 ${SETTINGS_PALETTES.green.border}, 0 6px 12px rgba(0,0,0,0.15)`,
+                    }}
+                  >
+                    <span className="font-bold tracking-tight" style={settingsCheatLabelStyle(SETTINGS_PALETTES.green)}>
+                      Auto Merge {autoMergeMode ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
+                ) : null}
                 {/* 2. +1Mil Coins — green */}
                 {onAddMoney ? (
                   <button

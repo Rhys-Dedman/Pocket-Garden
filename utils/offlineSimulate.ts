@@ -18,6 +18,10 @@ import {
   spawnWildGrowthPlantOnGrid,
   WILD_GROWTH_UNLOCK_PLAYER_LEVEL,
 } from './wildGrowth';
+import {
+  applyGoldenPotHarvestPerMinute,
+  applyGoldenPotProductionPerMinute,
+} from '../constants/goldenPotBonuses';
 
 const HARVEST_CHARGES_MAX = 3;
 
@@ -58,6 +62,8 @@ export interface OfflineSimInput {
    * When false (e.g. FTUE not finished), seed/harvest still simulate but surplus is not banked as offline coins.
    */
   earnOfflineCoins?: boolean;
+  /** Golden pots unlocked (`plantMastery.unlockedLevels.length`); affects bar fill rates when bonuses apply. */
+  goldenPotCount?: number;
 }
 
 export interface OfflineSimResult {
@@ -113,18 +119,21 @@ export function simulateOfflineSeedHarvest(input: OfflineSimInput): OfflineSimRe
 
   const seedProdLevel = input.seedsState?.seed_production?.level ?? 0;
   const harvestSpeedLevel = getHarvestSpeedLevel(input.cropsState);
+  const goldPots = input.goldenPotCount ?? 0;
 
   const getSeedRatePerMs = (wallTime: number) => {
     if (seedFrozen) return 0;
     const hasRapid = input.activeBoosts.some((b) => b.offerId === 'rapid_seeds' && b.endTime > wallTime);
-    const perMin = hasRapid ? 15 : (3 + (7 * Math.min(9, Math.max(0, seedProdLevel))) / 9);
+    let perMin = hasRapid ? 15 : (3 + (7 * Math.min(9, Math.max(0, seedProdLevel))) / 9);
+    perMin = applyGoldenPotProductionPerMinute(perMin, goldPots);
     return (perMin * 100) / (60 * 1000);
   };
 
   const getHarvestRatePerMs = (wallTime: number) => {
     if (harvestFrozen) return 0;
     const hasRapid = input.activeBoosts.some((b) => b.offerId === 'rapid_harvest' && b.endTime > wallTime);
-    const perMin = hasRapid ? 15 : (3 + (7 * Math.min(9, Math.max(0, harvestSpeedLevel))) / 9);
+    let perMin = hasRapid ? 15 : (3 + (7 * Math.min(9, Math.max(0, harvestSpeedLevel))) / 9);
+    perMin = applyGoldenPotHarvestPerMinute(perMin, goldPots);
     return (perMin * 100) / (60 * 1000);
   };
 

@@ -3,14 +3,14 @@
  * Default OFF. Persisted in localStorage like Performance mode.
  */
 
-const STORAGE_KEY = 'farm-merge-auto-merge';
+export const AUTO_MERGE_STORAGE_KEY = 'farm-merge-auto-merge';
 
 let autoMergeMode = false;
 
 function readFromStorage(): boolean {
   if (typeof localStorage === 'undefined') return false;
   try {
-    return localStorage.getItem(STORAGE_KEY) === 'true';
+    return localStorage.getItem(AUTO_MERGE_STORAGE_KEY) === 'true';
   } catch {
     return false;
   }
@@ -24,7 +24,7 @@ export function setAutoMergeMode(on: boolean): void {
   autoMergeMode = on;
   try {
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY, on ? 'true' : 'false');
+      localStorage.setItem(AUTO_MERGE_STORAGE_KEY, on ? 'true' : 'false');
     }
   } catch {
     // ignore

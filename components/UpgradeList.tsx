@@ -9,6 +9,11 @@ import {
   WILD_GROWTH_UNLOCK_PLAYER_LEVEL,
 } from '../utils/wildGrowth';
 import { PlantWithPot } from './PlantWithPot';
+import {
+  hasGoldenPotHarvest150,
+  hasGoldenPotInstantOrders,
+  hasGoldenPotProduction150,
+} from '../constants/goldenPotBonuses';
 
 export interface UpgradeState {
   level: number;
@@ -204,6 +209,8 @@ interface UpgradeListProps {
   ftue10LockScroll?: boolean;
   /** Called after an upgrade is purchased (for FTUE 10 completion) */
   onUpgradePurchase?: (upgradeId: string) => void;
+  /** Golden pots unlocked — some tiers supersede upgrade visuals and caps. */
+  goldenPotCount?: number;
 }
 
 interface UpgradeDef {
@@ -453,13 +460,15 @@ export const isCropYieldMaxed = (cropsState: Record<string, UpgradeState>): bool
   return level >= 9; // 1 + 9 = 10 max
 };
 
-/** Order Speed: goal loading time in seconds (15 base - 1 per level, min 5). */
-export const getGoalLoadingSeconds = (harvestState: HarvestState): number => {
+/** Order Speed: goal loading time in seconds (15 base - 1 per level, min 5). Golden pot tier 8+ → 0s. */
+export const getGoalLoadingSeconds = (harvestState: HarvestState, goldenPotCount = 0): number => {
+  if (hasGoldenPotInstantOrders(goldenPotCount)) return 0;
   const level = harvestState?.customer_speed?.level ?? 0;
   return Math.max(5, 15 - 1 * level);
 };
 
-export const isCustomerSpeedMaxed = (harvestState: Record<string, UpgradeState>): boolean => {
+export const isCustomerSpeedMaxed = (harvestState: Record<string, UpgradeState>, goldenPotCount = 0): boolean => {
+  if (hasGoldenPotInstantOrders(goldenPotCount)) return true;
   const level = harvestState?.customer_speed?.level ?? 0;
   return level >= 10; // 15 - 1*10 = 5s
 };
@@ -565,7 +574,7 @@ export const createInitialHarvestState = (): Record<string, UpgradeState> => ({
   happy_customer: { level: 0, progress: 0 },
 });
 
-export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange, money, setMoney, seedsState: propsSeedsState, setSeedsState: propsSetSeedsState, harvestState: propsHarvestState, setHarvestState: propsSetHarvestState, cropsState: propsCropsState, setCropsState: propsSetCropsState, lockedCellCount = 0, onUnlockCell, fertilizableCellCount = 0, onFertilizeCell, highestPlantEver = 1, masteredPlantLevels = [], rewardedOffers = [], onRewardedOfferPanelClick, onRewardedOfferClick, playerLevel = 1, pendingUnlockUpgradeId = null, pendingOfferHighlightId = null, isExpanded = false, protectedOfferId = null, ftue10GreenFlashUpgradeId = null, ftue10PurchaseButtonRef, ftue10LockScroll = false, onUpgradePurchase }) => {
+export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange, money, setMoney, seedsState: propsSeedsState, setSeedsState: propsSetSeedsState, harvestState: propsHarvestState, setHarvestState: propsSetHarvestState, cropsState: propsCropsState, setCropsState: propsSetCropsState, lockedCellCount = 0, onUnlockCell, fertilizableCellCount = 0, onFertilizeCell, highestPlantEver = 1, masteredPlantLevels = [], rewardedOffers = [], onRewardedOfferPanelClick, onRewardedOfferClick, playerLevel = 1, pendingUnlockUpgradeId = null, pendingOfferHighlightId = null, isExpanded = false, protectedOfferId = null, ftue10GreenFlashUpgradeId = null, ftue10PurchaseButtonRef, ftue10LockScroll = false, onUpgradePurchase, goldenPotCount = 0 }) => {
   const [internalSeedsState, setInternalSeedsState] = useState<Record<string, UpgradeState>>(createInitialSeedsState);
   const seedsState = propsSeedsState ?? internalSeedsState;
   const setSeedsState = propsSetSeedsState ?? setInternalSeedsState;
@@ -1060,17 +1069,17 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
         
         // Check if this upgrade is maxed
         const isMaxed = 
-          (upgrade.id === 'seed_production' && state.level >= 9) || // 10%..100% visual; 3/min..10/min
+          (upgrade.id === 'seed_production' && (state.level >= 9 || hasGoldenPotProduction150(goldenPotCount))) ||
           (upgrade.id === 'seed_surplus' && isSurplusRechargesMaxed(seedsState as SeedsState)) ||
           (upgrade.id === 'seed_storage' && isSeedStorageMaxed(stateMap as SeedsState)) ||
           (upgrade.id === 'double_seeds' && isDoubleSeedsMaxed(stateMap as SeedsState)) ||
-          (upgrade.id === 'harvest_speed' && state.level >= 9) || // 10%..100% visual; 3/min..10/min
+          (upgrade.id === 'harvest_speed' && (state.level >= 9 || hasGoldenPotHarvest150(goldenPotCount))) ||
           (upgrade.id === 'bonus_seeds' && isBonusSeedMaxed(stateMap as SeedsState)) ||
           (upgrade.id === 'plot_expansion' && isPlotExpansionMaxed(lockedCellCount)) ||
           (upgrade.id === 'wild_growth' && isWildGrowthMaxLevel(state.level)) ||
           (upgrade.id === 'crop_value' && isCropYieldMaxed(stateMap)) ||
           (upgrade.id === 'merge_harvest' && isMergeHarvestMaxed(stateMap)) ||
-          (upgrade.id === 'customer_speed' && isCustomerSpeedMaxed(stateMap)) ||
+          (upgrade.id === 'customer_speed' && isCustomerSpeedMaxed(stateMap, goldenPotCount)) ||
           (upgrade.id === 'market_value' && isMarketValueMaxed(stateMap)) ||
           (upgrade.id === 'happy_customer' && isHappyCustomerMaxed(stateMap));
         
@@ -1097,7 +1106,10 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
         const seedsValue = category === 'SEEDS' ? getSeedsUpgradeValue(upgrade.id, state.level, stateMap as SeedsState) : null;
         const cropsValue = category === 'CROPS' ? getCropsUpgradeValue(upgrade.id, state.level) : null;
         const harvestValue = category === 'HARVEST' ? getHarvestUpgradeValue(upgrade.id, state.level) : null;
-        const displayValue = seedsValue ?? cropsValue ?? harvestValue;
+        let displayValue = seedsValue ?? cropsValue ?? harvestValue;
+        if (upgrade.id === 'seed_production' && hasGoldenPotProduction150(goldenPotCount)) displayValue = '150%';
+        if (upgrade.id === 'harvest_speed' && hasGoldenPotHarvest150(goldenPotCount)) displayValue = '150%';
+        if (upgrade.id === 'customer_speed' && hasGoldenPotInstantOrders(goldenPotCount)) displayValue = '0s';
         
         const UNLOCK_FLASH_BLUE = '#89c8e1';
         return (
