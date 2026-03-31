@@ -33,6 +33,8 @@ interface LevelUpPopupProps {
   description: string;
   /** Icon path for header (matches the upgrade being unlocked) */
   icon: string;
+  /** When set, shown inside the blue header circle instead of `icon` (e.g. PlantWithPot). */
+  headerIcon?: React.ReactNode;
   onUnlockNow?: () => void;
   appScale?: number;
   /** When provided, show smaller text above title (e.g. "New Feature") */
@@ -102,6 +104,7 @@ export const LevelUpPopup: React.FC<LevelUpPopupProps> = ({
   title,
   description,
   icon,
+  headerIcon,
   onUnlockNow,
   appScale = 1,
   subtitle,
@@ -358,17 +361,30 @@ export const LevelUpPopup: React.FC<LevelUpPopupProps> = ({
               className="absolute inset-0 w-full h-full object-contain"
               style={{ filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.25))' }}
             />
-            <img
-              src={icon}
-              alt=""
-              className="relative object-contain"
-              style={{
-                width: `${75 * iconScale}px`,
-                height: `${75 * iconScale}px`,
-                filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))',
-                marginTop: '-4px',
-              }}
-            />
+            {headerIcon != null ? (
+              <div
+                className="relative flex items-center justify-center"
+                style={{
+                  width: `${75 * iconScale}px`,
+                  height: `${75 * iconScale}px`,
+                  marginTop: '-4px',
+                }}
+              >
+                {headerIcon}
+              </div>
+            ) : (
+              <img
+                src={icon}
+                alt=""
+                className="relative object-contain"
+                style={{
+                  width: `${75 * iconScale}px`,
+                  height: `${75 * iconScale}px`,
+                  filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))',
+                  marginTop: '-4px',
+                }}
+              />
+            )}
           </div>
 
           {/* Background container */}

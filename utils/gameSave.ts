@@ -12,7 +12,8 @@ import type {
 import type { ActiveBoostData } from '../components/ActiveBoostIndicator';
 import { STORE_STARTER_PACK_COUNTDOWN_END_MS_KEY } from '../offers';
 import { normalizeBarnShelvesUnlocked } from '../constants/barnShelves';
-import { PLANT_MASTERY_ORDERS_PER_SEGMENT } from '../constants/plantMastery';
+import { PLANT_MASTERY_ORDERS_PER_SEGMENT, getMaxStoredOrdersProgressForTarget } from '../constants/plantMastery';
+import { parseCollectionFtuePhase } from '../constants/collectionFtue';
 import { AUTO_MERGE_STORAGE_KEY } from './autoMergeMode';
 
 function normalizePlantMasteryUnlockPending(raw: unknown): number[] {
@@ -72,6 +73,15 @@ export interface GameSaveV1 {
   plantMasteryUnlockPending: number[];
   /** Plant levels (1–24) where mastery has been purchased. */
   plantMasteryUnlockedLevels: number[];
+  /**
+   * After first "View Collection" from level 5: bar shows 50/50 for plant 1 and tier 1 is mastered.
+   * Next collected goal clears this and moves to plant 2 at 1/50.
+   */
+  plantMasteryIntroBarComplete?: boolean;
+  /** After collection FTUE fully finished (tapped Garden at end). */
+  collectionFtueCompleted?: boolean;
+  /** Resumable step for collection FTUE; cleared when completed. */
+  collectionFtuePhase?: string | null;
   activeTab: TabType;
   activeScreen: ScreenType;
   isExpanded: boolean;
@@ -158,12 +168,33 @@ export function loadGameSave(): GameSaveV1 | null {
     data.plantMasteryUnlockedLevels = normalizePlantMasteryUnlockedLevels(
       (data as GameSaveV1 & { plantMasteryUnlockedLevels?: unknown }).plantMasteryUnlockedLevels
     );
-    const seg = PLANT_MASTERY_ORDERS_PER_SEGMENT;
-    if (data.plantMasteryTargetLevel < 24) {
-      data.plantMasteryOrdersProgress = Math.min(data.plantMasteryOrdersProgress, seg - 1);
-    } else {
-      data.plantMasteryOrdersProgress = Math.min(data.plantMasteryOrdersProgress, seg);
+    if (typeof data.plantMasteryIntroBarComplete !== 'boolean') {
+      data.plantMasteryIntroBarComplete = false;
     }
+    if (data.plantMasteryIntroBarComplete && data.plantMasteryTargetLevel !== 1) {
+      data.plantMasteryIntroBarComplete = false;
+    }
+    const seg = PLANT_MASTERY_ORDERS_PER_SEGMENT;
+    const maxP = getMaxStoredOrdersProgressForTarget(
+      data.plantMasteryTargetLevel,
+      seg,
+      data.plantMasteryIntroBarComplete,
+    );
+    data.plantMasteryOrdersProgress = Math.min(data.plantMasteryOrdersProgress, maxP);
+    if (typeof data.collectionFtueCompleted !== 'boolean') {
+      data.collectionFtueCompleted = false;
+    }
+    let cPhase = parseCollectionFtuePhase(data.collectionFtuePhase);
+    if (data.collectionFtueCompleted) cPhase = null;
+    else {
+      if (cPhase === 'popup_free' && data.plantMasteryUnlockPending.includes(1)) {
+        cPhase = 'point_unlock';
+      }
+      if (cPhase === 'wait_reveal' && data.plantMasteryUnlockedLevels.includes(1)) {
+        cPhase = 'point_bonuses';
+      }
+    }
+    data.collectionFtuePhase = cPhase;
     const wg = (data as GameSaveV1).wildGrowthAccumulatorMs;
     if (typeof wg !== 'number' || !Number.isFinite(wg)) {
       (data as GameSaveV1).wildGrowthAccumulatorMs = 0;

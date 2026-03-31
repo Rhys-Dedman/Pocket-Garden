@@ -243,22 +243,22 @@ const SEEDS_UNLOCK_LEVELS: Record<string, number> = {
   seed_production: 1,
   seed_storage: 2, // Storage Capacity: unlocks at level 2
   double_seeds: 4,
-  bonus_seeds: 8,
+  bonus_seeds: 9,
 };
 
 const CROPS_UNLOCK_LEVELS: Record<string, number> = {
   harvest_speed: 1,
   plot_expansion: 2,
   wild_growth: WILD_GROWTH_UNLOCK_PLAYER_LEVEL,
-  crop_value: 9,
-  merge_harvest: 10,
+  crop_value: 10,
+  merge_harvest: 11,
 };
 
 const HARVEST_UNLOCK_LEVELS: Record<string, number> = {
   customer_speed: 1,
   seed_surplus: 3,
-  market_value: 6,
-  happy_customer: 10,
+  market_value: 7,
+  happy_customer: 11,
 };
 
 /** Pricing tier: higher tier = higher strength multiplier in the same cost formula. */
@@ -342,32 +342,82 @@ const calculateUpgradeCost = (upgradeId: string, currentLevel: number): number =
   return cost;
 };
 
+/** Highest player level that shows a scripted unlock popup (Plant Collection at 5 … Happy Customers at 11). */
+export const MAX_LEVEL_WITH_CUSTOM_UNLOCK_POPUP = 11;
+
+export type LevelUnlockInfo = {
+  title: string;
+  description: string;
+  icon: string;
+  upgradeId?: string;
+  tab?: TabType;
+  /** Level-up header: plant 1 + golden pot instead of icon image */
+  plantCollectionHeader?: boolean;
+  /** After confirm: go to Collection (barn) */
+  navigateToBarnOnUnlock?: boolean;
+  /** Primary button label (default Unlock Now! in LevelUpPopup) */
+  levelUpButtonText?: string;
+};
+
 /** Get level unlock info for level-up popup. Returns title, description, icon, and optionally upgradeId/tab for Unlock Now behavior. */
-export const getLevelUnlockInfo = (level: number): { title: string; description: string; icon: string; upgradeId?: string; tab?: TabType } => {
-  const allUnlocks: { level: number; upgradeId: string; tab: TabType; name: string; description: string; icon: string; popupDescription?: string }[] = [
+export const getLevelUnlockInfo = (level: number): LevelUnlockInfo => {
+  type Row = {
+    level: number;
+    upgradeId: string;
+    tab: TabType;
+    name: string;
+    description: string;
+    icon: string;
+    popupDescription?: string;
+    plantCollectionHeader?: boolean;
+    navigateToBarnOnUnlock?: boolean;
+    buttonText?: string;
+  };
+  const allUnlocks: Row[] = [
     { level: 2, upgradeId: 'plot_expansion', tab: 'CROPS', name: 'Garden Expansion', description: 'Unlock additional plots in the garden', icon: 'icon_plotexpansion.png', popupDescription: 'You can now unlock additional plots in the garden' },
     { level: 3, upgradeId: 'seed_surplus', tab: 'HARVEST', name: 'Surplus Recharges', description: 'Increase coins gained from extra seed and harvest recharges', icon: 'icon_seedsurplus.png', popupDescription: 'Increase coins gained from extra seed and harvest recharges' },
     { level: 4, upgradeId: 'double_seeds', tab: 'SEEDS', name: 'Double Seeds', description: 'Increase chance to spawn 2 seeds at a time', icon: 'icon_seedquality.png', popupDescription: 'Increase chance to spawn 2 seeds at a time' },
-    { level: 5, upgradeId: 'wild_growth', tab: 'CROPS', name: 'Wild Growth', description: 'Plants automatically duplicate over time', icon: 'icon_luckymerge.png', popupDescription: 'Plants in your garden will now automatically duplicate over time' },
-    { level: 6, upgradeId: 'market_value', tab: 'HARVEST', name: 'Market Value', description: 'Increase the coins earned when completing orders', icon: 'icon_marketvalue.png', popupDescription: 'You can now increase the coins earned when completing orders' },
-    { level: 7, upgradeId: '', tab: 'HARVEST', name: 'Extra Orders', description: 'You can now recieve up to 4 orders at a time', icon: 'icon_extracustomer.png', popupDescription: 'You can now recieve up to 4 orders at a time' },
-    { level: 8, upgradeId: 'bonus_seeds', tab: 'SEEDS', name: 'Lucky Seed', description: 'Increase chance to produce a bonus higher level seed', icon: 'icon_luckyseed.png', popupDescription: 'Seeds now have a chance to produce an extra higher level plant' },
-    { level: 9, upgradeId: 'crop_value', tab: 'CROPS', name: 'Crop Yield', description: 'Increase how many crops your plants produce when harvesting', icon: 'icon_cropvalue.png', popupDescription: 'You can now increase how many crops your plants produce when harvesting' },
-    { level: 10, upgradeId: 'happy_customer', tab: 'HARVEST', name: 'Happy Customers', description: 'Increase chance that customers pay double for orders', icon: 'icon_happycustomer.png', popupDescription: 'You can now increase the chance for customers to pay double coins for orders' },
+    {
+      level: 5,
+      upgradeId: '',
+      tab: 'CROPS',
+      name: 'Plant Collection',
+      description: 'Collect and upgrade your plants for bonuses.',
+      icon: 'icon_plantmastery.png',
+      popupDescription: 'Collect and upgrade your plants for bonuses.',
+      plantCollectionHeader: true,
+      navigateToBarnOnUnlock: true,
+      buttonText: 'View Collection',
+    },
+    { level: 6, upgradeId: 'wild_growth', tab: 'CROPS', name: 'Wild Growth', description: 'Plants automatically duplicate over time', icon: 'icon_luckymerge.png', popupDescription: 'Plants in your garden will now automatically duplicate over time' },
+    { level: 7, upgradeId: 'market_value', tab: 'HARVEST', name: 'Market Value', description: 'Increase the coins earned when completing orders', icon: 'icon_marketvalue.png', popupDescription: 'You can now increase the coins earned when completing orders' },
+    { level: 8, upgradeId: '', tab: 'HARVEST', name: 'Extra Orders', description: 'You can now recieve up to 4 orders at a time', icon: 'icon_extracustomer.png', popupDescription: 'You can now recieve up to 4 orders at a time' },
+    { level: 9, upgradeId: 'bonus_seeds', tab: 'SEEDS', name: 'Lucky Seed', description: 'Increase chance to produce a bonus higher level seed', icon: 'icon_luckyseed.png', popupDescription: 'Seeds now have a chance to produce an extra higher level plant' },
+    { level: 10, upgradeId: 'crop_value', tab: 'CROPS', name: 'Crop Yield', description: 'Increase how many crops your plants produce when harvesting', icon: 'icon_cropvalue.png', popupDescription: 'You can now increase how many crops your plants produce when harvesting' },
+    { level: 11, upgradeId: 'happy_customer', tab: 'HARVEST', name: 'Happy Customers', description: 'Increase chance that customers pay double for orders', icon: 'icon_happycustomer.png', popupDescription: 'You can now increase the chance for customers to pay double coins for orders' },
   ];
-  const match = allUnlocks.find(u => u.level === level);
+  const match = allUnlocks.find((u) => u.level === level);
   if (match) {
-    const desc = match.popupDescription
-      ?? (match.upgradeId ? `You can now ${match.description.toLowerCase()}` : match.description);
+    const desc =
+      match.popupDescription ?? (match.upgradeId ? `You can now ${match.description.toLowerCase()}` : match.description);
     return {
       title: match.name,
       description: desc,
       icon: assetPath(`/assets/icons/${match.icon}`),
       upgradeId: match.upgradeId || undefined,
       tab: match.upgradeId ? match.tab : undefined,
+      plantCollectionHeader: match.plantCollectionHeader,
+      navigateToBarnOnUnlock: match.navigateToBarnOnUnlock,
+      levelUpButtonText: match.buttonText,
     };
   }
-  return { title: `Level ${level}`, description: "You've reached a new level!", icon: assetPath('/assets/icons/icon_level.png'), upgradeId: undefined, tab: undefined };
+  return {
+    title: `Level ${level}`,
+    description: "You've reached a new level!",
+    icon: assetPath('/assets/icons/icon_level.png'),
+    upgradeId: undefined,
+    tab: undefined,
+  };
 };
 
 const ICON_LOCK = assetPath('/assets/icons/icon_lock.png');
@@ -502,7 +552,7 @@ export const getSurplusSalesMultiplier = (harvestState: HarvestState): number =>
 };
 
 /** Player level at which Surplus Sales unlocks (coin harvest for plants without goals). */
-export const SURPLUS_SALES_UNLOCK_PLAYER_LEVEL = 8;
+export const SURPLUS_SALES_UNLOCK_PLAYER_LEVEL = 9;
 
 /** Whether Surplus Sales is unlocked (plants without goals can be harvested for coins). Active as soon as player reaches level 8, at 1.0x multiplier; upgrade points increase multiplier. */
 export const isSurplusSalesUnlocked = (harvestState: HarvestState, playerLevel: number): boolean => {

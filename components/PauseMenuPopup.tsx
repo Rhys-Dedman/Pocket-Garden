@@ -22,6 +22,8 @@ interface PauseMenuPopupProps {
   onAddMoney?: (amount: number) => void;
   /** Sync auto-merge toggle to parent (gameplay only reacts when this updates). */
   onAutoMergeChange?: (enabled: boolean) => void;
+  /** Reset economy + progression to post–FTUE 11, level 1 (no tutorial replay). */
+  onClearProgress?: () => void;
   /** Clear save and reload (fresh FTUE). */
   onResetProgress?: () => void;
   /** Remove all active boosts (bar + timers + gameplay effects). */
@@ -103,6 +105,7 @@ export const PauseMenuPopup: React.FC<PauseMenuPopupProps> = ({
   onUnlockPlantClick,
   onGoldenPotClick,
   onAddMoney,
+  onClearProgress,
   onResetProgress,
   onClearBoosts,
   onClearShed,
@@ -118,6 +121,7 @@ export const PauseMenuPopup: React.FC<PauseMenuPopupProps> = ({
   const [unlockPlantPressed, setUnlockPlantPressed] = useState(false);
   const [goldenPotPressed, setGoldenPotPressed] = useState(false);
   const [addCoinsPressed, setAddCoinsPressed] = useState(false);
+  const [clearProgressPressed, setClearProgressPressed] = useState(false);
   const [resetPressed, setResetPressed] = useState(false);
   const [clearBoostsPressed, setClearBoostsPressed] = useState(false);
   const [clearShedPressed, setClearShedPressed] = useState(false);
@@ -334,6 +338,20 @@ export const PauseMenuPopup: React.FC<PauseMenuPopupProps> = ({
                     </span>
                   </button>
                 ) : null}
+                {/* Rewarded Ad — yellow */}
+                <button
+                  type="button"
+                  onMouseDown={() => setRewardedPressed(true)}
+                  onMouseUp={() => setRewardedPressed(false)}
+                  onMouseLeave={() => setRewardedPressed(false)}
+                  onClick={handleRewardedAdClick}
+                  className="relative flex items-center justify-center rounded-lg transition-all w-full"
+                  style={settingsCheatButtonStyle(SETTINGS_PALETTES.yellow, rewardedPressed)}
+                >
+                  <span className="font-bold tracking-tight" style={settingsCheatLabelStyle(SETTINGS_PALETTES.yellow)}>
+                    Rewarded Ad
+                  </span>
+                </button>
                 {/* 3. Unlock plant — blue */}
                 {onUnlockPlantClick ? (
                   <button
@@ -389,19 +407,6 @@ export const PauseMenuPopup: React.FC<PauseMenuPopupProps> = ({
                   </span>
                 </button>
                 {/* 6. Rewarded Ad — yellow */}
-                <button
-                  type="button"
-                  onMouseDown={() => setRewardedPressed(true)}
-                  onMouseUp={() => setRewardedPressed(false)}
-                  onMouseLeave={() => setRewardedPressed(false)}
-                  onClick={handleRewardedAdClick}
-                  className="relative flex items-center justify-center rounded-lg transition-all w-full"
-                  style={settingsCheatButtonStyle(SETTINGS_PALETTES.yellow, rewardedPressed)}
-                >
-                  <span className="font-bold tracking-tight" style={settingsCheatLabelStyle(SETTINGS_PALETTES.yellow)}>
-                    Rewarded Ad
-                  </span>
-                </button>
                 {/* 7. Clear Boosts — red */}
                 {onClearBoosts ? (
                   <button
@@ -434,7 +439,21 @@ export const PauseMenuPopup: React.FC<PauseMenuPopupProps> = ({
                     </span>
                   </button>
                 ) : null}
-                {/* 9. Reset Progress — red */}
+                {onClearProgress ? (
+                  <button
+                    type="button"
+                    onMouseDown={() => setClearProgressPressed(true)}
+                    onMouseUp={() => setClearProgressPressed(false)}
+                    onMouseLeave={() => setClearProgressPressed(false)}
+                    onClick={() => onClearProgress()}
+                    className="relative flex items-center justify-center rounded-lg transition-all w-full"
+                    style={settingsCheatButtonStyle(SETTINGS_PALETTES.red, clearProgressPressed)}
+                  >
+                    <span className="font-bold tracking-tight" style={settingsCheatLabelStyle(SETTINGS_PALETTES.red)}>
+                      Clear Progress
+                    </span>
+                  </button>
+                ) : null}
                 {onResetProgress ? (
                   <button
                     type="button"
@@ -446,7 +465,7 @@ export const PauseMenuPopup: React.FC<PauseMenuPopupProps> = ({
                     style={settingsCheatButtonStyle(SETTINGS_PALETTES.red, resetPressed)}
                   >
                     <span className="font-bold tracking-tight" style={settingsCheatLabelStyle(SETTINGS_PALETTES.red)}>
-                      Reset Progress
+                      Reset Game
                     </span>
                   </button>
                 ) : null}

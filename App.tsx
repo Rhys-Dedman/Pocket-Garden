@@ -1,9 +1,9 @@
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { HexBoard, type HexBoardHandle } from './components/HexBoard';
 import { UpgradeTabs } from './components/UpgradeTabs';
-import { UpgradeList, createInitialSeedsState, createInitialHarvestState, createInitialCropsState, getSeedLevelFromHighestPlant, getBonusSeedChance, getSeedSurplusValue, getSeedStorageMax, getCropYieldPerHarvest, getHarvestSpeedLevel, getMergeHarvestChance, getGoalLoadingSeconds, getMarketValueMultiplier, getPremiumOrdersMinLevel, getSurplusSalesMultiplier, isSurplusSalesUnlocked, getHappyCustomerChance, HarvestState, UpgradeState, RewardedOffer, getLevelUnlockInfo, isCustomerSpeedMaxed } from './components/UpgradeList';
+import { UpgradeList, createInitialSeedsState, createInitialHarvestState, createInitialCropsState, getSeedLevelFromHighestPlant, getBonusSeedChance, getSeedSurplusValue, getSeedStorageMax, getCropYieldPerHarvest, getHarvestSpeedLevel, getMergeHarvestChance, getGoalLoadingSeconds, getMarketValueMultiplier, getPremiumOrdersMinLevel, getSurplusSalesMultiplier, isSurplusSalesUnlocked, getHappyCustomerChance, HarvestState, UpgradeState, RewardedOffer, getLevelUnlockInfo, MAX_LEVEL_WITH_CUSTOM_UNLOCK_POPUP, isCustomerSpeedMaxed } from './components/UpgradeList';
 import { Navbar } from './components/Navbar';
 import { StoreScreen } from './components/StoreScreen';
 import { SideAction } from './components/SideAction';
@@ -74,6 +74,7 @@ import {
   type GameSaveV1,
   GAME_SAVE_VERSION,
 } from './utils/gameSave';
+import { createPostFtueCleanSave } from './utils/postFtueCleanSave';
 import { isOfflineCoinEarningsBlockedByFtue, simulateOfflineSeedHarvest, simulateWildGrowthOffline } from './utils/offlineSimulate';
 import {
   getWildGrowthIntervalMsForLevel,
@@ -93,6 +94,9 @@ import {
   hasGoldenPotMergeCoinsDouble,
   hasGoldenPotOfflineEarningsDouble,
 } from './constants/goldenPotBonuses';
+import { CollectionFtueOverlay } from './components/CollectionFtueOverlay';
+import type { CollectionFtuePhase } from './constants/collectionFtue';
+import { COLLECTION_FTUE_BLOCKER_TINT, parseCollectionFtuePhase } from './constants/collectionFtue';
 import { formatCompactNumber } from './utils/formatCompactNumber';
 import { getPlantCoinValue } from './utils/plantValue';
 
@@ -101,21 +105,26 @@ export function getCoinValueForLevel(level: number): number {
   return getPlantCoinValue(level);
 }
 
-/** Max plant goal slots: 3 until level 7 (Extra Orders), then 4. Slot 4 (5th) is reserved for coin goal only. */
+/** Max plant goal slots: 3 until level 8 (Extra Orders), then 4. Slot 4 (5th) is reserved for coin goal only. */
 const getMaxGoalSlots = (playerLevel: number): number =>
-  playerLevel >= 7 ? 4 : 3;
+  playerLevel >= 8 ? 4 : 3;
+
+/** Plant Collection barn UI (shelves, mastery bar, bonuses button) — navigation stays open; data keeps updating while locked. */
+const PLANT_COLLECTION_UI_UNLOCK_LEVEL = 5;
+/** Collection FTUE: after “View Collection”, defer hole + finger until barn slide finishes. */
+const COLLECTION_FTUE_INTRO_CTA_OVERLAY_DELAY_MS = 600;
 
 /** Merge with no matching goal: coin panel uses seed-surplus scale (default cream panel bg). */
 const MERGE_COIN_HARVEST_PANEL_SCALE = 1.5;
 
-/** Goals required to level up. Level 1→2: 7; then each level = round(previous × 1.35) */
+/** Goals to complete at each player level before leveling up: 8…30, then 30 forever. */
+const GOALS_TO_LEVEL_UP_TABLE = [8, 10, 12, 15, 20, 25, 30] as const;
+const GOALS_TO_LEVEL_UP_CAP = 30;
+
 const getGoalsRequiredForLevel = (level: number): number => {
-  if (level <= 1) return 7;
-  let prev = 7;
-  for (let i = 2; i <= level; i++) {
-    prev = Math.round(prev * 1.35);
-  }
-  return prev;
+  const L = Math.max(1, Math.floor(level));
+  if (L > GOALS_TO_LEVEL_UP_TABLE.length) return GOALS_TO_LEVEL_UP_CAP;
+  return GOALS_TO_LEVEL_UP_TABLE[L - 1];
 };
 
 /** Goal difficulty scaling: 0.9 = easier, 1.0 = normal, 1.1 = harder, 1.2 = much harder */
@@ -472,6 +481,8 @@ type PlantMasterySlice = {
   targetLevel: number;
   unlockPending: number[];
   unlockedLevels: number[];
+  /** First barn visit from L5: fake 50/50 + plant 1 mastered until next goal. */
+  plantMasteryIntroBarComplete: boolean;
 };
 
 /** Plant names and descriptions for discovery popups */
@@ -755,6 +766,7 @@ function BarnShelfPlantSlot({
               <div className="rounded-full p-[3px]" style={{ backgroundColor: '#ad9467', boxSizing: 'border-box' }}>
                 <button
                   type="button"
+                  id={plantLevel === 1 ? 'collection-ftue-unlock-1' : undefined}
                   className="flex w-full min-w-0 select-none items-center justify-center rounded-full font-black shadow-[0_5px_0_#6e8d2d,0_8px_16px_rgba(0,0,0,0.15),inset_0_2px_0_rgba(255,255,255,0.35)] transition-[transform,box-shadow] active:translate-y-[2px] active:shadow-[inset_0_3px_6px_rgba(0,0,0,0.15)]"
                   style={{
                     boxSizing: 'border-box',
@@ -894,6 +906,20 @@ export default function App() {
   // Discovery popup state
   const [discoveryPopup, setDiscoveryPopup] = useState<{ isVisible: boolean; level: number } | null>(null);
   const [goldenPotBonusesPopupOpen, setGoldenPotBonusesPopupOpen] = useState(false);
+  /** First-time collection flow after level 5 (golden pot + bonuses + garden hint). */
+  const [collectionFtuePhase, setCollectionFtuePhase] = useState<CollectionFtuePhase | null>(null);
+  const [collectionFtueCompleted, setCollectionFtueCompleted] = useState(false);
+  const [collectionFtueHoleRect, setCollectionFtueHoleRect] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  /** After “View Collection” → barn, wait for the screen slide to finish before measuring the golden-pot CTA + finger. */
+  const [collectionFtueIntroCtaOverlayReady, setCollectionFtueIntroCtaOverlayReady] = useState(false);
+  /** Collection FTUE: fast “50/50 → 0/50” slide when first pot turns gold. */
+  const [collectionFtueMasteryBarFastReset, setCollectionFtueMasteryBarFastReset] = useState(false);
+  const goldenPotBonusesWasOpenRef = useRef(false);
   /** Paid store purchase confirmation (IAP stub); Collect fires boost particles + activation. */
   const [purchaseSuccessfulUi, setPurchaseSuccessfulUi] = useState<{
     headerImageSrc: string;
@@ -1027,7 +1053,7 @@ export default function App() {
   const [seenMasteryUnlockLevels, setSeenMasteryUnlockLevels] = useState<number[]>([]);
   const [barnAttentionBounceLevels, setBarnAttentionBounceLevels] = useState<number[]>([]);
   const [unlockingCellIndices, setUnlockingCellIndices] = useState<number[]>([]); // Cells currently playing unlock animation
-  // Goals: 3 slots until player level 7 (Extra Orders unlock); then 4 plant goal slots. Slot 4 (5th) is coin goal only.
+  // Goals: 3 slots until player level 8 (Extra Orders unlock); then 4 plant goal slots. Slot 4 (5th) is coin goal only.
   const [goalSlots, setGoalSlots] = useState<('empty' | 'loading' | 'green' | 'completed')[]>(['green', 'green', 'green', 'empty', 'empty']);
   const [goalPlantTypes, setGoalPlantTypes] = useState<number[]>([1, 2, 3, 0, 0]); // plant level 1-5 per slot when green
   const goalSlotsRef = useRef(goalSlots);
@@ -1125,13 +1151,14 @@ export default function App() {
   /** Increments on coin impact to trigger wallet icon bounce (sparkles removed, bounce kept). */
   const [walletBounceTrigger, setWalletBounceTrigger] = useState(0);
   const [playerLevel, setPlayerLevel] = useState(1);
-  const [playerLevelProgress, setPlayerLevelProgress] = useState(0); // 0-5, 5 goals to level up
+  const [playerLevelProgress, setPlayerLevelProgress] = useState(0); // 0 .. getGoalsRequiredForLevel(playerLevel)-1
   const [plantMasteryGoalsCompleted, setPlantMasteryGoalsCompleted] = useState(0);
   const [plantMastery, setPlantMastery] = useState<PlantMasterySlice>({
     ordersProgress: 0,
     targetLevel: 1,
     unlockPending: [],
     unlockedLevels: [],
+    plantMasteryIntroBarComplete: false,
   });
   const goldenPotCount = plantMastery.unlockedLevels.length;
   const [masteryPurchaseRevealLevels, setMasteryPurchaseRevealLevels] = useState<number[]>([]);
@@ -1167,6 +1194,14 @@ export default function App() {
     setPlantMasteryGoalsCompleted((c) => c + 1);
     const seg = PLANT_MASTERY_ORDERS_PER_SEGMENT;
     setPlantMastery((m) => {
+      if (m.plantMasteryIntroBarComplete) {
+        return {
+          ...m,
+          plantMasteryIntroBarComplete: false,
+          targetLevel: 2,
+          ordersProgress: 1,
+        };
+      }
       if (m.targetLevel === 24 && m.ordersProgress >= seg) {
         return m;
       }
@@ -1199,6 +1234,14 @@ export default function App() {
     const seg = PLANT_MASTERY_ORDERS_PER_SEGMENT;
     setPlantMastery((m) => {
       if (m.targetLevel === 24 && m.ordersProgress >= seg) return m;
+      if (m.plantMasteryIntroBarComplete) {
+        return {
+          ...m,
+          plantMasteryIntroBarComplete: false,
+          targetLevel: 2,
+          ordersProgress: 0,
+        };
+      }
       const pending = m.unlockPending.includes(m.targetLevel)
         ? m.unlockPending
         : [...m.unlockPending, m.targetLevel].sort((a, b) => a - b);
@@ -1433,6 +1476,71 @@ export default function App() {
       cancelAnimationFrame(raf);
     };
   }, []);
+
+  // Barn scroll: drag with momentum (state must exist before collection FTUE layout effect deps).
+  const [barnScrollY, setBarnScrollY] = useState(0);
+
+  useLayoutEffect(() => {
+    if (activeScreen !== 'BARN' || !collectionFtuePhase || collectionFtueCompleted) {
+      setCollectionFtueHoleRect(null);
+      return;
+    }
+    if (collectionFtuePhase === 'wait_reveal' || collectionFtuePhase === 'point_garden_nav') {
+      setCollectionFtueHoleRect(null);
+      return;
+    }
+    if (collectionFtuePhase === 'popup_free' && plantInfoPopup?.isVisible) {
+      setCollectionFtueHoleRect(null);
+      return;
+    }
+    if (collectionFtuePhase === 'point_bonuses' && goldenPotBonusesPopupOpen) {
+      setCollectionFtueHoleRect(null);
+      return;
+    }
+    if (collectionFtuePhase === 'intro_cta' && !collectionFtueIntroCtaOverlayReady) {
+      setCollectionFtueHoleRect(null);
+      return;
+    }
+    const container = document.getElementById('game-container');
+    const scale = appScaleRef.current || 1;
+    const measureEl = (id: string) => {
+      const el = document.getElementById(id);
+      if (!el || !container) return null;
+      const cr = container.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      return {
+        left: (r.left - cr.left) / scale,
+        top: (r.top - cr.top) / scale,
+        width: r.width / scale,
+        height: r.height / scale,
+      };
+    };
+    const id =
+      collectionFtuePhase === 'intro_cta'
+        ? 'collection-ftue-cta'
+        : collectionFtuePhase === 'point_unlock'
+          ? 'collection-ftue-unlock-1'
+          : collectionFtuePhase === 'point_bonuses'
+            ? 'collection-ftue-view-bonuses'
+            : null;
+    const apply = () => setCollectionFtueHoleRect(id ? measureEl(id) : null);
+    apply();
+    const t = window.setTimeout(apply, 120);
+    const onResize = () => apply();
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.clearTimeout(t);
+    };
+  }, [
+    activeScreen,
+    collectionFtuePhase,
+    collectionFtueCompleted,
+    plantInfoPopup?.isVisible,
+    goldenPotBonusesPopupOpen,
+    barnScrollY,
+    collectionFtueIntroCtaOverlayReady,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -1875,6 +1983,24 @@ export default function App() {
       ? masterySeg
       : plantMastery.ordersProgress;
   const masteryBarFillPct = (masteryBarNumerator / masterySeg) * 100;
+  const isPlantCollectionUiUnlocked = playerLevel >= PLANT_COLLECTION_UI_UNLOCK_LEVEL;
+  const collectionFtueActive = collectionFtuePhase != null && !collectionFtueCompleted;
+  const hideBonusesForCollectionFtue =
+    collectionFtueActive &&
+    (collectionFtuePhase === 'intro_cta' || collectionFtuePhase === 'point_unlock');
+  const showCollectionFtueCta =
+    collectionFtueActive &&
+    (collectionFtuePhase === 'intro_cta' || collectionFtuePhase === 'point_unlock');
+  const collectionFtueCtaDisabled = collectionFtuePhase === 'point_unlock';
+  const collectionFtueBlockViewBonuses = collectionFtueActive && collectionFtuePhase === 'wait_reveal';
+  /** Full-screen dim only: barn transition after View Collection, before CTA hole + finger. */
+  const collectionFtueIntroCtaBlockOnly =
+    collectionFtuePhase === 'intro_cta' && activeScreen === 'BARN' && !collectionFtueIntroCtaOverlayReady;
+  /** Collection FTUE: no barn pan/scroll while finger is on golden-pot CTA or plant 1 Unlock. */
+  const collectionFtueBarnScrollLocked =
+    activeScreen === 'BARN' &&
+    !collectionFtueCompleted &&
+    (collectionFtuePhase === 'intro_cta' || collectionFtuePhase === 'point_unlock' || collectionFtuePhase === 'point_bonuses');
   const unreadMasteryUnlockLevels = plantMastery.unlockPending.filter(
     (level) => !seenMasteryUnlockLevels.includes(level)
   );
@@ -1916,14 +2042,16 @@ export default function App() {
     return () => cancelAnimationFrame(rafId);
   }, [isExpanded, updateSpriteCenter]);
 
-  // Barn scroll: drag with momentum, moves background + shelves together
-  const [barnScrollY, setBarnScrollY] = useState(0);
   const [plantCollectionViewBonusesPressed, setPlantCollectionViewBonusesPressed] = useState(false);
+  const [collectionFtueCtaPressed, setCollectionFtueCtaPressed] = useState(false);
 
   useEffect(() => {
     const el = barnScrollRef.current;
     if (!el) return;
-    
+    if (collectionFtueBarnScrollLocked) {
+      return () => {};
+    }
+
     let isDown = false;
     let startY = 0;
     let startScrollY = 0;
@@ -2036,19 +2164,23 @@ export default function App() {
       window.removeEventListener('mouseup', handleMouseUpGlobal);
       cancelAnimationFrame(rafId);
     };
-  }, [barnScale]);
+  }, [barnScale, collectionFtueBarnScrollLocked]);
 
   useEffect(() => {
     if (activeScreen === 'BARN') {
       setBarnNotification(false);
       return;
     }
-    setBarnNotification(unreadMasteryUnlockLevels.length > 0);
-  }, [activeScreen, unreadMasteryUnlockLevels.length]);
+    setBarnNotification(
+      playerLevel >= PLANT_COLLECTION_UI_UNLOCK_LEVEL && unreadMasteryUnlockLevels.length > 0
+    );
+  }, [activeScreen, unreadMasteryUnlockLevels.length, playerLevel]);
 
   useEffect(() => {
     if (activeScreen !== 'BARN') return;
+    if (!isPlantCollectionUiUnlocked) return;
     if (plantMastery.unlockPending.length === 0) return;
+    if (collectionFtuePhase === 'intro_cta') return;
     if (skipNextBarnPendingBounceRef.current) {
       skipNextBarnPendingBounceRef.current = false;
       return;
@@ -2078,7 +2210,41 @@ export default function App() {
       }, Math.max(bounceAnimMs + 50, (plantMastery.unlockPending.length - 1) * 180 + bounceAnimMs + 50));
       barnEnterFocusTimeoutRef.current = null;
     }, 150);
-  }, [activeScreen, barnScale, plantMastery.unlockPending]);
+  }, [activeScreen, barnScale, plantMastery.unlockPending, isPlantCollectionUiUnlocked, collectionFtuePhase]);
+
+  /** Resume collection FTUE when re-entering barn (e.g. after save load). */
+  useEffect(() => {
+    if (activeScreen !== 'BARN') return;
+    if (collectionFtueCompleted) return;
+    if (!plantMastery.plantMasteryIntroBarComplete) return;
+    if (plantMastery.unlockedLevels.includes(1)) return;
+    setCollectionFtuePhase((p) => (p == null ? 'intro_cta' : p));
+  }, [activeScreen, collectionFtueCompleted, plantMastery.plantMasteryIntroBarComplete, plantMastery.unlockedLevels]);
+
+  useEffect(() => {
+    if (goldenPotBonusesWasOpenRef.current && !goldenPotBonusesPopupOpen && collectionFtuePhase === 'point_bonuses') {
+      setCollectionFtuePhase('point_garden_nav');
+    }
+    goldenPotBonusesWasOpenRef.current = goldenPotBonusesPopupOpen;
+  }, [goldenPotBonusesPopupOpen, collectionFtuePhase]);
+
+  useEffect(() => {
+    if (collectionFtueCompleted || collectionFtuePhase !== 'intro_cta' || activeScreen !== 'BARN') {
+      setCollectionFtueIntroCtaOverlayReady(false);
+      return;
+    }
+    setCollectionFtueIntroCtaOverlayReady(false);
+    const t = window.setTimeout(() => {
+      setCollectionFtueIntroCtaOverlayReady(true);
+    }, COLLECTION_FTUE_INTRO_CTA_OVERLAY_DELAY_MS);
+    return () => window.clearTimeout(t);
+  }, [collectionFtuePhase, activeScreen, collectionFtueCompleted]);
+
+  useEffect(() => {
+    if (!collectionFtueMasteryBarFastReset) return;
+    const t = window.setTimeout(() => setCollectionFtueMasteryBarFastReset(false), 240);
+    return () => window.clearTimeout(t);
+  }, [collectionFtueMasteryBarFastReset]);
 
   useEffect(() => {
     return () => {
@@ -4024,7 +4190,12 @@ export default function App() {
       targetLevel: save.plantMasteryTargetLevel,
       unlockPending: [...save.plantMasteryUnlockPending],
       unlockedLevels: [...save.plantMasteryUnlockedLevels],
+      plantMasteryIntroBarComplete: save.plantMasteryIntroBarComplete === true,
     });
+    setCollectionFtueCompleted(save.collectionFtueCompleted === true);
+    setCollectionFtuePhase(
+      save.collectionFtueCompleted ? null : parseCollectionFtuePhase(save.collectionFtuePhase) ?? null
+    );
     setActiveTab(save.activeTab);
     setRewardedOffers(save.rewardedOffers.filter((o) => !isStorePremiumOnlyOfferId(o.id)));
     setBarnNotification(save.barnNotification);
@@ -4272,6 +4443,9 @@ export default function App() {
       plantMasteryTargetLevel: plantMastery.targetLevel,
       plantMasteryUnlockPending: [...plantMastery.unlockPending],
       plantMasteryUnlockedLevels: [...plantMastery.unlockedLevels],
+      plantMasteryIntroBarComplete: plantMastery.plantMasteryIntroBarComplete,
+      collectionFtueCompleted,
+      collectionFtuePhase: collectionFtueCompleted ? null : collectionFtuePhase,
       activeTab,
       activeScreen,
       isExpanded,
@@ -4577,7 +4751,7 @@ export default function App() {
                           if (!levelUpGuardRef.current) {
                             levelUpGuardRef.current = true;
                             const nextLevel = playerLevel + 1;
-                            if (nextLevel <= 10) {
+                            if (nextLevel <= MAX_LEVEL_WITH_CUSTOM_UNLOCK_POPUP) {
                               setLevelUpPopup({ isVisible: true, level: nextLevel });
                             } else {
                               setPlayerLevel((l) => l + 1);
@@ -4695,7 +4869,7 @@ export default function App() {
                           if (!levelUpGuardRef.current) {
                             levelUpGuardRef.current = true;
                             const nextLevel = playerLevel + 1;
-                            if (nextLevel <= 10) {
+                            if (nextLevel <= MAX_LEVEL_WITH_CUSTOM_UNLOCK_POPUP) {
                               setLevelUpPopup({ isVisible: true, level: nextLevel });
                             } else {
                               setPlayerLevel((l) => l + 1);
@@ -5302,7 +5476,10 @@ export default function App() {
               {/* Barn scrollable area - background and shelves move together */}
               <div 
                 ref={barnScrollRef}
-                className="absolute inset-0 overflow-hidden cursor-grab active:cursor-grabbing select-none z-10"
+                className={`absolute inset-0 overflow-hidden select-none z-10 ${
+                  collectionFtueBarnScrollLocked ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'
+                }`}
+                style={collectionFtueBarnScrollLocked ? { touchAction: 'none' } : undefined}
               >
                 {/* Content container that moves with scroll - fixed width centered, overflow visible for large elements */}
                 <div 
@@ -5353,8 +5530,12 @@ export default function App() {
                   >
                     <div className="relative" style={{ width: '320px' }}>
                       <img
-                        src={assetPath('/assets/topui/ui_plantmastery.png')}
-                      alt="Plant Collection"
+                        src={
+                          isPlantCollectionUiUnlocked
+                            ? assetPath('/assets/topui/ui_plantmastery.png')
+                            : assetPath('/assets/topui/ui_plantmastery_locked.png')
+                        }
+                        alt="Plant Collection"
                         style={{
                           width: '320px',
                           height: 'auto',
@@ -5363,7 +5544,11 @@ export default function App() {
                       />
                       <div
                         className="absolute inset-0 flex flex-col items-center"
-                        style={{ paddingTop: 30, paddingLeft: 14, paddingRight: 14 }}
+                        style={{
+                          paddingTop: isPlantCollectionUiUnlocked ? 30 : 121,
+                          paddingLeft: 14,
+                          paddingRight: 14,
+                        }}
                       >
                         <h2
                           className="font-black tracking-tight text-center"
@@ -5378,124 +5563,212 @@ export default function App() {
                         </h2>
                         <div className="w-full flex items-center justify-center" style={{ marginTop: 4, marginBottom: 6 }}>
                           <img
-                            src={assetPath('/assets/popups/popup_divider.png')}
+                            src={
+                              assetPath(
+                                isPlantCollectionUiUnlocked
+                                  ? '/assets/popups/popup_divider.png'
+                                  : '/assets/popups/popup_divider_blue.png'
+                              )
+                            }
                             alt=""
                             className="h-auto object-contain"
                             style={{ width: '220px' }}
                           />
                         </div>
-                        <p
-                          className="font-medium text-center leading-relaxed italic w-full"
-                          style={{
-                            color: '#c2b280',
-                            fontFamily: 'Inter, sans-serif',
-                            fontSize: '0.875rem',
-                            paddingLeft: 10,
-                            paddingRight: 10,
-                            marginBottom: 8,
-                          }}
-                        >
-                          <span className="block">Complete orders to unlock golden pots.</span>
-                          <span className="block">Earn bonuses as you collect them.</span>
-                        </p>
-                        {/* Plant mastery: outer bar flat L/R; green fill has curved right “head” */}
-                        <div className="flex items-center justify-center gap-0 w-full" style={{ marginTop: 0, marginLeft: -2 }}>
-                          <img
-                            src={assetPath('/assets/icons/icon_plantmastery.png')}
-                            alt=""
-                            className="w-[36px] h-[36px] object-contain shrink-0 relative z-20"
-                            style={{ marginLeft: 8, marginRight: -8 }}
-                            draggable={false}
-                          />
-                          <div
-                            className="relative inline-flex items-center border overflow-hidden"
-                            style={{
-                              width: '159px',
-                              height: 26,
-                              backgroundColor: '#775041',
-                              borderWidth: 2,
-                              borderColor: '#e9dcaf',
-                            }}
-                          >
-                            <div className="flex-1 h-full flex items-stretch relative" style={{ padding: 1.5 }}>
-                              <span
-                                className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none font-black text-xs leading-none z-10"
+                        {isPlantCollectionUiUnlocked ? (
+                          <>
+                            <p
+                              className="font-medium text-center leading-relaxed italic w-full"
+                              style={{
+                                color: '#c2b280',
+                                fontFamily: 'Inter, sans-serif',
+                                fontSize: '0.875rem',
+                                paddingLeft: 10,
+                                paddingRight: 10,
+                                marginBottom: 8,
+                              }}
+                            >
+                              <span className="block">Complete orders to unlock golden pots.</span>
+                              <span className="block">Earn bonuses as you collect them.</span>
+                            </p>
+                            {/* Plant mastery: outer bar flat L/R; green fill has curved right “head” */}
+                            <div className="flex items-center justify-center gap-0 w-full" style={{ marginTop: 0, marginLeft: -2 }}>
+                              <img
+                                src={assetPath('/assets/icons/icon_plantmastery.png')}
+                                alt=""
+                                className="w-[36px] h-[36px] object-contain shrink-0 relative z-20"
+                                style={{ marginLeft: 8, marginRight: -8 }}
+                                draggable={false}
+                              />
+                              <div
+                                className="relative inline-flex items-center border overflow-hidden"
                                 style={{
-                                  color: '#fcf0c7',
-                                  WebkitTextStroke: '1px rgba(0,0,0,0.5)',
-                                  paintOrder: 'stroke fill',
+                                  width: '159px',
+                                  height: 26,
+                                  backgroundColor: '#775041',
+                                  borderWidth: 2,
+                                  borderColor: '#e9dcaf',
                                 }}
                               >
-                                {masteryBarNumerator}/{masterySeg}
-                              </span>
-                              <div className="w-full h-full overflow-hidden bg-[#775041]">
-                                <div
-                                  className="relative h-full overflow-hidden"
-                                  style={{
-                                    width: `${masteryBarFillPct}%`,
-                                    transition: 'width 250ms cubic-bezier(0.25, 1, 0.5, 1)',
-                                    borderTopRightRadius: 9999,
-                                    borderBottomRightRadius: 9999,
-                                  }}
-                                >
-                                  <div
-                                    className="w-full h-full overflow-hidden relative"
+                                <div className="flex-1 h-full flex items-stretch relative" style={{ padding: 1.5 }}>
+                                  <span
+                                    className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none font-black text-xs leading-none z-10"
                                     style={{
-                                      padding: 1,
-                                      borderTopRightRadius: 9999,
-                                      borderBottomRightRadius: 9999,
-                                      background: 'linear-gradient(180deg, #d2e894 0%, #8fb33a 100%)',
+                                      color: '#fcf0c7',
+                                      WebkitTextStroke: '1px rgba(0,0,0,0.5)',
+                                      paintOrder: 'stroke fill',
                                     }}
                                   >
+                                    {masteryBarNumerator}/{masterySeg}
+                                  </span>
+                                  <div className="w-full h-full overflow-hidden bg-[#775041]">
                                     <div
-                                      className="h-full w-full"
+                                      className="relative h-full overflow-hidden"
                                       style={{
+                                        width: `${masteryBarFillPct}%`,
+                                        transition: `width ${collectionFtueMasteryBarFastReset ? 90 : 250}ms cubic-bezier(0.25, 1, 0.5, 1)`,
                                         borderTopRightRadius: 9999,
                                         borderBottomRightRadius: 9999,
-                                        background: 'linear-gradient(180deg, #b8d458 0%, #8fb33a 100%)',
                                       }}
-                                    />
+                                    >
+                                      <div
+                                        className="w-full h-full overflow-hidden relative"
+                                        style={{
+                                          padding: 1,
+                                          borderTopRightRadius: 9999,
+                                          borderBottomRightRadius: 9999,
+                                          background: 'linear-gradient(180deg, #d2e894 0%, #8fb33a 100%)',
+                                        }}
+                                      >
+                                        <div
+                                          className="h-full w-full"
+                                          style={{
+                                            borderTopRightRadius: 9999,
+                                            borderBottomRightRadius: 9999,
+                                            background: 'linear-gradient(180deg, #b8d458 0%, #8fb33a 100%)',
+                                          }}
+                                        />
+                                      </div>
+                                    </div>
                                   </div>
                                 </div>
                               </div>
+                              <div
+                                className="w-[44px] h-[44px] shrink-0 relative z-20"
+                                style={{ marginLeft: -13, marginTop: -3 }}
+                              >
+                                <PlantWithPot
+                                  level={plantMastery.targetLevel}
+                                  mastered={plantMastery.unlockedLevels.includes(plantMastery.targetLevel)}
+                                  wrapperClassName="h-full w-full"
+                                />
+                              </div>
                             </div>
-                          </div>
-                          <div
-                            className="w-[44px] h-[44px] shrink-0 relative z-20"
-                            style={{ marginLeft: -13, marginTop: -3 }}
-                          >
-                            <PlantWithPot
-                              level={plantMastery.targetLevel}
-                              mastered={plantMastery.unlockedLevels.includes(plantMastery.targetLevel)}
-                              wrapperClassName="h-full w-full"
-                            />
-                          </div>
-                        </div>
-                        {/* Same green affordance as upgrade purchase buttons (UpgradeList unlocked row) */}
-                        <button
-                          type="button"
-                          onMouseDown={() => setPlantCollectionViewBonusesPressed(true)}
-                          onMouseUp={() => setPlantCollectionViewBonusesPressed(false)}
-                          onMouseLeave={() => setPlantCollectionViewBonusesPressed(false)}
-                          onClick={() => setGoldenPotBonusesPopupOpen(true)}
-                          className={`relative w-1/2 mx-auto flex items-center justify-center mt-2 h-8 transition-all border outline outline-1 rounded-[8px] shadow-[inset_0_1px_1px_rgba(255,255,255,0.4)] active:translate-y-[2px] active:border-b-0 active:mb-[4px]`}
-                          style={{
-                            backgroundColor: plantCollectionViewBonusesPressed ? '#61882b' : '#cae060',
-                            borderColor: plantCollectionViewBonusesPressed ? '#61882b' : '#9db546',
-                            borderBottomWidth: plantCollectionViewBonusesPressed ? '0px' : '4px',
-                            marginBottom: plantCollectionViewBonusesPressed ? '4px' : '0px',
-                            outlineColor: plantCollectionViewBonusesPressed ? '#61882b' : '#9db546',
-                          }}
-                        >
-                          <span
-                            className="text-[13px] font-black tracking-tighter"
+                            {!hideBonusesForCollectionFtue && (
+                            <button
+                              id="collection-ftue-view-bonuses"
+                              type="button"
+                              onMouseDown={() => setPlantCollectionViewBonusesPressed(true)}
+                              onMouseUp={() => setPlantCollectionViewBonusesPressed(false)}
+                              onMouseLeave={() => setPlantCollectionViewBonusesPressed(false)}
+                              onClick={() => setGoldenPotBonusesPopupOpen(true)}
+                              className={`relative w-1/2 mx-auto flex items-center justify-center mt-2 h-8 transition-all border outline outline-1 rounded-[8px] shadow-[inset_0_1px_1px_rgba(255,255,255,0.4)] active:translate-y-[2px] active:border-b-0 active:mb-[4px]`}
+                              style={{
+                                backgroundColor: plantCollectionViewBonusesPressed ? '#61882b' : '#cae060',
+                                borderColor: plantCollectionViewBonusesPressed ? '#61882b' : '#9db546',
+                                borderBottomWidth: plantCollectionViewBonusesPressed ? '0px' : '4px',
+                                marginBottom: plantCollectionViewBonusesPressed ? '4px' : '0px',
+                                outlineColor: plantCollectionViewBonusesPressed ? '#61882b' : '#9db546',
+                                opacity: collectionFtueBlockViewBonuses ? 0.45 : 1,
+                                pointerEvents: collectionFtueBlockViewBonuses ? 'none' : 'auto',
+                              }}
+                            >
+                              <span
+                                className="text-[13px] font-black tracking-tighter"
+                                style={{
+                                  color: plantCollectionViewBonusesPressed ? '#cbe05d' : '#587e26',
+                                }}
+                              >
+                                View Bonuses
+                              </span>
+                            </button>
+                            )}
+                            {showCollectionFtueCta && (
+                              <button
+                                id="collection-ftue-cta"
+                                type="button"
+                                onMouseDown={() => !collectionFtueCtaDisabled && setCollectionFtueCtaPressed(true)}
+                                onMouseUp={() => setCollectionFtueCtaPressed(false)}
+                                onMouseLeave={() => setCollectionFtueCtaPressed(false)}
+                                onClick={() => {
+                                  if (collectionFtueCtaDisabled) return;
+                                  setCollectionFtuePhase('point_unlock');
+                                  setBarnAttentionBounceLevels([1]);
+                                  window.setTimeout(() => setBarnAttentionBounceLevels([]), 550);
+                                }}
+                                className={`relative mx-auto flex items-center justify-center mt-2 min-h-8 px-2 py-2 transition-all border outline outline-1 rounded-[8px] shadow-[inset_0_1px_1px_rgba(255,255,255,0.4)] ${
+                                  collectionFtueCtaDisabled ? '' : 'active:translate-y-[2px] active:border-b-0 active:mb-[4px]'
+                                }`}
+                                style={{
+                                  width: '76.8%',
+                                  maxWidth: 240,
+                                  boxSizing: 'border-box',
+                                  backgroundColor: collectionFtueCtaDisabled
+                                    ? '#e3c28c'
+                                    : collectionFtueCtaPressed
+                                      ? '#61882b'
+                                      : '#cae060',
+                                  borderColor: collectionFtueCtaDisabled
+                                    ? '#c7a36e'
+                                    : collectionFtueCtaPressed
+                                      ? '#61882b'
+                                      : '#9db546',
+                                  borderBottomWidth: collectionFtueCtaPressed && !collectionFtueCtaDisabled ? '0px' : '4px',
+                                  marginBottom: collectionFtueCtaPressed && !collectionFtueCtaDisabled ? '4px' : '0px',
+                                  outlineColor: collectionFtueCtaDisabled
+                                    ? '#c7a36e'
+                                    : collectionFtueCtaPressed
+                                      ? '#61882b'
+                                      : '#9db546',
+                                  pointerEvents: collectionFtueCtaDisabled ? 'none' : 'auto',
+                                }}
+                              >
+                                <span
+                                  className="w-full font-black tracking-tight text-center leading-snug px-0.5 text-[14px]"
+                                  style={{
+                                    color: collectionFtueCtaDisabled
+                                      ? '#a68e64'
+                                      : collectionFtueCtaPressed
+                                        ? '#cbe05d'
+                                        : '#587e26',
+                                  }}
+                                >
+                                  Let&apos;s Unlock a Golden Pot
+                                </span>
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <p
+                            className="font-medium text-center leading-relaxed italic w-full"
                             style={{
-                              color: plantCollectionViewBonusesPressed ? '#cbe05d' : '#587e26',
+                              color: '#c2b280',
+                              fontFamily: 'Inter, sans-serif',
+                              fontSize: '0.875rem',
+                              paddingLeft: 10,
+                              paddingRight: 10,
+                              marginBottom: 8,
                             }}
                           >
-                            View Bonuses
-                          </span>
-                        </button>
+                            The Collection is unlocked at
+                            <span
+                              className="block font-black not-italic"
+                              style={{ color: '#67a4c6', fontFamily: 'Inter, sans-serif' }}
+                            >
+                              Level {PLANT_COLLECTION_UI_UNLOCK_LEVEL}
+                            </span>
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -5519,49 +5792,58 @@ export default function App() {
                             className="pointer-events-none"
                             style={{ width: '100%', height: 'auto' }}
                           />
-                          <div
-                            className="absolute flex justify-center items-center"
-                            style={{
-                              left: '50%',
-                              transform: 'translateX(-50%)',
-                              bottom: '125px',
-                              gap: '-10px',
-                              zIndex: 10,
-                              minHeight: '95px',
-                              width: '100%',
-                              isolation: 'isolate',
-                            }}
-                          >
-                            {[0, 1, 2, 3].map((plantOffset) => {
-                              const plantLevel = startPlant + plantOffset;
-                              const isPlantDiscovered = plantLevel <= highestPlantEver;
-                              const showMasteryUnlock =
-                                isPlantDiscovered && plantMastery.unlockPending.includes(plantLevel);
-                              const isPendingRevealBounce = barnAttentionBounceLevels.includes(plantLevel);
-                              const isMasteryPurchaseBounce = masteryPurchaseRevealLevels.includes(plantLevel);
-                              /** Stacking: unlock pills extend past 95px slots — higher index wins in horizontal overlap so the correct column receives the tap. */
-                              const barnCellStackZ = showMasteryUnlock ? 20 + plantOffset : isPlantDiscovered ? 2 : 0;
-                              return (
-                                <BarnShelfPlantSlot
-                                  key={plantOffset}
-                                  plantLevel={plantLevel}
-                                  isPlantDiscovered={isPlantDiscovered}
-                                  showMasteryUnlock={showMasteryUnlock}
-                                  isPendingRevealBounce={isPendingRevealBounce}
-                                  isMasteryPurchaseBounce={isMasteryPurchaseBounce}
-                                  barnCellStackZ={barnCellStackZ}
-                                  mastered={isPlantDiscovered && plantMastery.unlockedLevels.includes(plantLevel)}
-                                  masteryAdditiveGlow={
-                                    activeScreen === 'BARN' && (showMasteryUnlock || isMasteryPurchaseBounce)
-                                  }
-                                  masteryGlowDelaySec={PLANT_MASTERY_GLOW_ANIM_DELAY_SEC}
-                                  onOpenPlantInfo={() =>
-                                    setPlantInfoPopup({ isVisible: true, level: plantLevel })
-                                  }
-                                />
-                              );
-                            })}
-                          </div>
+                          {isPlantCollectionUiUnlocked && (
+                            <div
+                              className="absolute flex justify-center items-center"
+                              style={{
+                                left: '50%',
+                                transform: 'translateX(-50%)',
+                                bottom: '125px',
+                                gap: '-10px',
+                                zIndex: 10,
+                                minHeight: '95px',
+                                width: '100%',
+                                isolation: 'isolate',
+                              }}
+                            >
+                              {[0, 1, 2, 3].map((plantOffset) => {
+                                const plantLevel = startPlant + plantOffset;
+                                const isPlantDiscovered = plantLevel <= highestPlantEver;
+                                const showMasteryUnlock =
+                                  isPlantDiscovered &&
+                                  plantMastery.unlockPending.includes(plantLevel) &&
+                                  !(plantLevel === 1 && collectionFtuePhase === 'intro_cta');
+                                const isPendingRevealBounce = barnAttentionBounceLevels.includes(plantLevel);
+                                const isMasteryPurchaseBounce = masteryPurchaseRevealLevels.includes(plantLevel);
+                                /** Stacking: unlock pills extend past 95px slots — higher index wins in horizontal overlap so the correct column receives the tap. */
+                                const barnCellStackZ = showMasteryUnlock ? 20 + plantOffset : isPlantDiscovered ? 2 : 0;
+                                return (
+                                  <BarnShelfPlantSlot
+                                    key={plantOffset}
+                                    plantLevel={plantLevel}
+                                    isPlantDiscovered={isPlantDiscovered}
+                                    showMasteryUnlock={showMasteryUnlock}
+                                    isPendingRevealBounce={isPendingRevealBounce}
+                                    isMasteryPurchaseBounce={isMasteryPurchaseBounce}
+                                    barnCellStackZ={barnCellStackZ}
+                                    mastered={isPlantDiscovered && plantMastery.unlockedLevels.includes(plantLevel)}
+                                    masteryAdditiveGlow={
+                                      activeScreen === 'BARN' &&
+                                      (showMasteryUnlock || isMasteryPurchaseBounce) &&
+                                      !(plantLevel === 1 && collectionFtuePhase === 'intro_cta')
+                                    }
+                                    masteryGlowDelaySec={PLANT_MASTERY_GLOW_ANIM_DELAY_SEC}
+                                    onOpenPlantInfo={() => {
+                                      if (collectionFtuePhase === 'point_unlock' && plantLevel === 1) {
+                                        setCollectionFtuePhase('popup_free');
+                                      }
+                                      setPlantInfoPopup({ isVisible: true, level: plantLevel });
+                                    }}
+                                  />
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -5590,9 +5872,9 @@ export default function App() {
                         if (state) setLimitedOfferPopup(state);
                       }}
                       onPauseClick={() => setPauseMenuOpen(true)}
-                      activeBoosts={activeBoosts}
+                      activeBoosts={[]}
                       activeBoostAreaRef={activeBoostAreaRef}
-                      activeBoostMinWidthPx={ACTIVE_BOOST_INDICATOR_SIZE_PX}
+                      activeBoostMinWidthPx={0}
                       headerLeftWrapperRef={headerLeftWrapperRef}
                       onBoostComplete={(id, rect) => {
                         setActiveBoosts((prev) => prev.filter((b) => b.id !== id));
@@ -5627,6 +5909,10 @@ export default function App() {
         <Navbar 
           activeScreen={activeScreen} 
           onScreenChange={(screen) => {
+            if (screen === 'FARM' && collectionFtuePhase === 'point_garden_nav') {
+              setCollectionFtuePhase(null);
+              setCollectionFtueCompleted(true);
+            }
             setActiveScreen(screen);
             if (screen === 'BARN') {
               setBarnNotification(false);
@@ -5636,6 +5922,7 @@ export default function App() {
           notifications={{
             BARN: barnNotification,
           }}
+          collectionFtueGardenFinger={collectionFtuePhase === 'point_garden_nav' && !collectionFtueCompleted}
         />
 
         {/* Leaf burst: portal to body so never clipped; viewport coords */}
@@ -6010,6 +6297,25 @@ export default function App() {
                 }}
               />
             )}
+            {activeScreen === 'BARN' &&
+              collectionFtuePhase &&
+              !collectionFtueCompleted &&
+              !(collectionFtuePhase === 'popup_free' && plantInfoPopup?.isVisible) &&
+              !(collectionFtuePhase === 'point_bonuses' && goldenPotBonusesPopupOpen) &&
+              collectionFtuePhase !== 'point_garden_nav' && (
+                <CollectionFtueOverlay
+                  active
+                  fullBlock={collectionFtuePhase === 'wait_reveal' || collectionFtueIntroCtaBlockOnly}
+                  holeRect={
+                    collectionFtuePhase === 'wait_reveal' || collectionFtueIntroCtaBlockOnly
+                      ? null
+                      : collectionFtueHoleRect
+                  }
+                  fingerStyle={collectionFtuePhase === 'point_bonuses' ? 'point_right' : 'seed'}
+                  blockerTint={COLLECTION_FTUE_BLOCKER_TINT}
+                  holePaddingPx={6}
+                />
+              )}
           </div>,
           document.body
         )}
@@ -6041,11 +6347,38 @@ export default function App() {
                   title={unlockInfo.title}
                   description={unlockInfo.description}
                   icon={unlockInfo.icon}
+                  headerIcon={
+                    unlockInfo.plantCollectionHeader ? (
+                      <PlantWithPot level={1} mastered wrapperClassName="h-full w-full scale-110" />
+                    ) : undefined
+                  }
+                  buttonText={unlockInfo.levelUpButtonText}
                   onUnlockNow={() => {
                     // Settings "Level Up" already advances `playerLevel` before showing the popup.
                     // Only increment here if the player is still below the popup level.
                     setPlayerLevel((l) => (l < levelUpPopup.level ? l + 1 : l));
                     setPlayerLevelProgress(0);
+                    if (unlockInfo.navigateToBarnOnUnlock) {
+                      setActiveScreen('BARN');
+                      const seg = PLANT_MASTERY_ORDERS_PER_SEGMENT;
+                      skipNextBarnPendingBounceRef.current = true;
+                      setPlantMastery((m) => {
+                        if (m.unlockedLevels.includes(1)) return m;
+                        const unlockPending = m.unlockPending.includes(1)
+                          ? m.unlockPending
+                          : [...m.unlockPending, 1].sort((a, b) => a - b);
+                        return {
+                          ...m,
+                          targetLevel: 1,
+                          ordersProgress: seg,
+                          unlockPending,
+                          plantMasteryIntroBarComplete: true,
+                        };
+                      });
+                      if (!collectionFtueCompleted) {
+                        setCollectionFtuePhase('intro_cta');
+                      }
+                    }
                     if (unlockInfo.upgradeId === 'seed_surplus') {
                       setSeedsState((prev) => ({
                         ...prev,
@@ -6058,7 +6391,7 @@ export default function App() {
                         merge_harvest: { level: 1, progress: 0 },
                       }));
                     }
-                    if (unlockInfo.tab && ftueUpgradePanelVisible) {
+                    if (unlockInfo.tab && ftueUpgradePanelVisible && !unlockInfo.navigateToBarnOnUnlock) {
                       setIsExpanded(true);
                       setActiveTab(unlockInfo.tab);
                       if (unlockInfo.upgradeId) {
@@ -6082,6 +6415,7 @@ export default function App() {
                 onClose={() => {
                   lastOtherPopupClosedAtRef.current = Date.now();
                   setGoldenPotBonusesPopupOpen(false);
+                  setCollectionFtuePhase((p) => (p === 'point_bonuses' ? 'point_garden_nav' : p));
                   queueMicrotask(() => {
                     tryStartAutoMergeRef.current();
                     scheduleAutoMergeRecheckRef.current(0);
@@ -6221,6 +6555,11 @@ export default function App() {
                 isUnlocked={plantInfoPopup.level <= highestPlantEver}
                 masteryPotUnlocked={plantMastery.unlockedLevels.includes(plantInfoPopup.level)}
                 appScale={appScale}
+                restrictClose={
+                  collectionFtuePhase === 'popup_free' &&
+                  plantInfoPopup.level === 1 &&
+                  !collectionFtueCompleted
+                }
                 masteryUnlock={
                   plantInfoPopup.level <= highestPlantEver &&
                   (plantMastery.unlockPending.includes(plantInfoPopup.level) ||
@@ -6231,12 +6570,36 @@ export default function App() {
                         isUnlocked: plantMastery.unlockedLevels.includes(plantInfoPopup.level),
                         onPurchase: () => {
                           const level = plantInfoPopup.level;
+                          const wasCollectionFtuePopup =
+                            collectionFtuePhase === 'popup_free' && level === 1 && !collectionFtueCompleted;
                           skipNextBarnPendingBounceRef.current = true;
                           purchasePlantMasteryForLevel(level);
+                          if (wasCollectionFtuePopup) {
+                            setCollectionFtuePhase('wait_reveal');
+                          }
                           lastOtherPopupClosedAtRef.current = Date.now();
                           setPlantInfoPopup(null);
                           window.setTimeout(() => {
                             triggerMasteryPurchaseReveal(level);
+                            if (wasCollectionFtuePopup) {
+                              // Immediately roll mastery bar to next plant (fast): 50/50 → 0/50, icon shows plant 2.
+                              setCollectionFtueMasteryBarFastReset(true);
+                              window.setTimeout(() => {
+                                setPlantMastery((m) => {
+                                  // Only apply if we just purchased plant 1.
+                                  if (!m.unlockedLevels.includes(1)) return m;
+                                  return {
+                                    ...m,
+                                    plantMasteryIntroBarComplete: false,
+                                    targetLevel: 2,
+                                    ordersProgress: 0,
+                                  };
+                                });
+                              }, 30);
+                              window.setTimeout(() => {
+                                setCollectionFtuePhase('point_bonuses');
+                              }, 720);
+                            }
                           }, 0);
                         },
                       }
@@ -6441,7 +6804,7 @@ export default function App() {
                 setPlayerLevel(nextLevel);
                 setPlayerLevelProgress(0);
                 setPlayerLevelFlashTrigger((t) => t + 1);
-                if (nextLevel <= 10) {
+                if (nextLevel <= MAX_LEVEL_WITH_CUSTOM_UNLOCK_POPUP) {
                   setLevelUpPopupQueue((q) => [...q, nextLevel]);
                 }
               }}
@@ -6465,8 +6828,25 @@ export default function App() {
                 setStoreFreeOfferSlots(pickInitialStoreFreeOfferSlots());
                 setStoreSlotCooldownEnds([0, 0]);
               }}
+              onClearProgress={() => {
+                if (
+                  !window.confirm('You will lose your progress and start from level 1 without the FTUE')
+                ) {
+                  return;
+                }
+                suppressGameSaveRef.current = true;
+                setAutoMergeMode(false);
+                persistGameSave(createPostFtueCleanSave());
+                window.location.reload();
+              }}
               onResetProgress={() => {
-                if (!window.confirm('Reset all progress and restart from the beginning? This cannot be undone.')) return;
+                if (
+                  !window.confirm(
+                    'You will Reset your game & progress back to the start including all FTUE'
+                  )
+                ) {
+                  return;
+                }
                 suppressGameSaveRef.current = true;
                 clearGameSave();
                 try {

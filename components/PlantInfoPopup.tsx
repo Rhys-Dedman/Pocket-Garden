@@ -41,6 +41,8 @@ interface PlantInfoPopupProps {
     isUnlocked?: boolean;
     onPurchase: () => void;
   };
+  /** Collection FTUE: no X, backdrop does not dismiss — player must use Golden Pot button. */
+  restrictClose?: boolean;
 }
 
 const POPUP_LEAF_COUNT = 30;
@@ -104,6 +106,7 @@ export const PlantInfoPopup: React.FC<PlantInfoPopupProps> = ({
   masteryPotUnlocked = false,
   appScale = 1,
   masteryUnlock,
+  restrictClose = false,
 }) => {
   const [animState, setAnimState] = useState<PopupAnimWithPreflight>('hidden');
   const [assetsReady, setAssetsReady] = useState(false);
@@ -237,7 +240,7 @@ export const PlantInfoPopup: React.FC<PlantInfoPopupProps> = ({
     <div 
       className="fixed inset-0 flex items-center justify-center"
       style={{ zIndex: 100, overflow: 'hidden', paddingTop: 'clamp(28px, 5vh, 52px)', pointerEvents: isPreflight ? 'none' : 'auto' }}
-      onClick={handleClose}
+      onClick={restrictClose ? undefined : handleClose}
     >
 {/* Backdrop - not scaled, covers full screen */}
       <div
@@ -250,6 +253,7 @@ export const PlantInfoPopup: React.FC<PlantInfoPopupProps> = ({
           backgroundColor: 'rgba(0, 0, 0, 0.7)',
           opacity: isLeaving || isPreflight ? 0 : 1,
           transition: `opacity ${POPUP_CLOSE_MS}ms ease-out`,
+          pointerEvents: restrictClose ? 'none' : 'auto',
         }}
       />
 
@@ -506,7 +510,7 @@ export const PlantInfoPopup: React.FC<PlantInfoPopupProps> = ({
                           style={{ width: 40, height: 40 }}
                           draggable={false}
                         />
-                        <span>{formatCompactNumber(masteryUnlock.coinCost)}</span>
+                        <span>{masteryUnlock.coinCost === 0 ? 'FREE' : formatCompactNumber(masteryUnlock.coinCost)}</span>
                       </>
                     )}
                   </button>
@@ -519,6 +523,7 @@ export const PlantInfoPopup: React.FC<PlantInfoPopupProps> = ({
         </div>
 
         {/* Close Button - X */}
+        {!restrictClose && (
         <button
           onClick={handleClose}
           className="absolute top-[56px] right-6 w-8 h-8 flex items-center justify-center transition-all hover:scale-110 active:scale-95"
@@ -533,6 +538,7 @@ export const PlantInfoPopup: React.FC<PlantInfoPopupProps> = ({
             <path d="M2 2L12 12M12 2L2 12" />
           </svg>
         </button>
+        )}
       </div>
       </div>
     </div>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ScreenType } from '../types';
 import { assetPath } from '../utils/assetPath';
+import { CollectionGardenNavFinger } from './CollectionGardenNavFinger';
 
 interface NavbarProps {
   activeScreen: ScreenType;
@@ -11,9 +12,17 @@ interface NavbarProps {
     FARM?: boolean;
     BARN?: boolean;
   };
+  /** Collection FTUE: non-blocking hint on Garden tab until player visits garden. */
+  collectionFtueGardenFinger?: boolean;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ activeScreen, onScreenChange, barnButtonRef, notifications = {} }) => {
+export const Navbar: React.FC<NavbarProps> = ({
+  activeScreen,
+  onScreenChange,
+  barnButtonRef,
+  notifications = {},
+  collectionFtueGardenFinger = false,
+}) => {
   // Track viewport width for responsive scaling
   const [viewportWidth, setViewportWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 420);
   
@@ -37,7 +46,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeScreen, onScreenChange, ba
   ];
 
   return (
-    <div className="relative shrink-0 overflow-visible z-50" style={{ height: '60px' }}>
+    <div id="navbar-root" className="relative shrink-0 overflow-visible z-50" style={{ height: '60px' }}>
       <nav 
         className="absolute inset-0 flex items-start justify-center overflow-visible"
         style={{ 
@@ -65,6 +74,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeScreen, onScreenChange, ba
         return (
           <div 
             key={item.id}
+            id={item.id === 'FARM' ? 'nav-tab-farm' : undefined}
             className="relative flex items-start justify-center"
             style={{ width: '135px', height: '100%' }}
           >
@@ -247,6 +257,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeScreen, onScreenChange, ba
       })}
       </div>
       </nav>
+      <CollectionGardenNavFinger active={collectionFtueGardenFinger} />
     </div>
   );
 };
