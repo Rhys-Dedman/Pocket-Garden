@@ -328,16 +328,16 @@ function normalizeActiveBoostsAfterLoad(boosts: ActiveBoostData[]): ActiveBoostD
 const getDiscoveryGoalBuffer = (highestPlant: number): number => {
   if (highestPlant <= 3) return 4;
   if (highestPlant <= 4) return 6;
-  if (highestPlant <= 5) return 8;
-  if (highestPlant <= 6) return 10;
-  if (highestPlant <= 7) return 12;
-  if (highestPlant <= 8) return 14;
-  if (highestPlant <= 9) return 16;
-  return 18; // 10+
+  if (highestPlant <= 5) return 9;
+  if (highestPlant <= 6) return 12;
+  if (highestPlant <= 7) return 14;
+  if (highestPlant <= 8) return 16;
+  if (highestPlant <= 9) return 18;
+  return 20; // 10+
 };
 
 /** Discovery popup coin reward = `getCoinValueForLevel(plant)` × this (before Double Coins boost). */
-const PLANT_DISCOVERY_COIN_MULTIPLIER = 5;
+const PLANT_DISCOVERY_COIN_MULTIPLIER = 10;
 
 /**
  * Pick plant level for a new goal.
@@ -6380,6 +6380,12 @@ export default function App() {
                       if (!collectionFtueCompleted) {
                         setCollectionFtuePhase('intro_cta');
                       }
+                    }
+                    if (unlockInfo.upgradeId === 'market_value') {
+                      setHarvestState((prev) => ({
+                        ...prev,
+                        market_value: { level: 1, progress: 0 },
+                      }));
                     }
                     if (unlockInfo.upgradeId === 'seed_surplus') {
                       setSeedsState((prev) => ({

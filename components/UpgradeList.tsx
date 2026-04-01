@@ -256,8 +256,8 @@ const CROPS_UNLOCK_LEVELS: Record<string, number> = {
 
 const HARVEST_UNLOCK_LEVELS: Record<string, number> = {
   customer_speed: 1,
-  seed_surplus: 3,
-  market_value: 7,
+  market_value: 3,
+  seed_surplus: 7,
   happy_customer: 11,
 };
 
@@ -375,7 +375,7 @@ export const getLevelUnlockInfo = (level: number): LevelUnlockInfo => {
   };
   const allUnlocks: Row[] = [
     { level: 2, upgradeId: 'plot_expansion', tab: 'CROPS', name: 'Garden Expansion', description: 'Unlock additional plots in the garden', icon: 'icon_plotexpansion.png', popupDescription: 'You can now unlock additional plots in the garden' },
-    { level: 3, upgradeId: 'seed_surplus', tab: 'HARVEST', name: 'Surplus Recharges', description: 'Increase coins gained from extra seed and harvest recharges', icon: 'icon_seedsurplus.png', popupDescription: 'Increase coins gained from extra seed and harvest recharges' },
+    { level: 3, upgradeId: 'market_value', tab: 'HARVEST', name: 'Market Value', description: 'Increase the coins earned when completing orders', icon: 'icon_marketvalue.png', popupDescription: 'You can now increase the coins earned when completing orders' },
     { level: 4, upgradeId: 'double_seeds', tab: 'SEEDS', name: 'Double Seeds', description: 'Increase chance to spawn 2 seeds at a time', icon: 'icon_seedquality.png', popupDescription: 'Increase chance to spawn 2 seeds at a time' },
     {
       level: 5,
@@ -390,7 +390,7 @@ export const getLevelUnlockInfo = (level: number): LevelUnlockInfo => {
       buttonText: 'View Collection',
     },
     { level: 6, upgradeId: 'wild_growth', tab: 'CROPS', name: 'Wild Growth', description: 'Plants automatically duplicate over time', icon: 'icon_luckymerge.png', popupDescription: 'Plants in your garden will now automatically duplicate over time' },
-    { level: 7, upgradeId: 'market_value', tab: 'HARVEST', name: 'Market Value', description: 'Increase the coins earned when completing orders', icon: 'icon_marketvalue.png', popupDescription: 'You can now increase the coins earned when completing orders' },
+    { level: 7, upgradeId: 'seed_surplus', tab: 'HARVEST', name: 'Surplus Recharges', description: 'Increase coins gained from extra seed and harvest recharges', icon: 'icon_seedsurplus.png', popupDescription: 'Increase coins gained from extra seed and harvest recharges' },
     { level: 8, upgradeId: '', tab: 'HARVEST', name: 'Extra Orders', description: 'You can now recieve up to 4 orders at a time', icon: 'icon_extracustomer.png', popupDescription: 'You can now recieve up to 4 orders at a time' },
     { level: 9, upgradeId: 'bonus_seeds', tab: 'SEEDS', name: 'Lucky Seed', description: 'Increase chance to produce a bonus higher level seed', icon: 'icon_luckyseed.png', popupDescription: 'Seeds now have a chance to produce an extra higher level plant' },
     { level: 10, upgradeId: 'crop_value', tab: 'CROPS', name: 'Crop Yield', description: 'Increase how many crops your plants produce when harvesting', icon: 'icon_cropvalue.png', popupDescription: 'You can now increase how many crops your plants produce when harvesting' },
@@ -488,7 +488,7 @@ const getHarvestUpgradeValue = (upgradeId: string, level: number): string | null
     case 'customer_speed':
       return `${Math.max(5, 15 - 1 * level)}s`;
     case 'market_value':
-      return `${(1 + 0.8 * Math.min(5, level)).toFixed(1)}x`;
+      return `${Math.min(3, 1 + 0.2 * level).toFixed(1)}x`;
     case 'seed_surplus':
       return level <= 0 ? '1.0x' : `${Math.min(5, 1 + 0.5 * (level - 1)).toFixed(1)}x`;
     case 'happy_customer':
@@ -523,15 +523,15 @@ export const isCustomerSpeedMaxed = (harvestState: Record<string, UpgradeState>,
   return level >= 10; // 15 - 1*10 = 5s
 };
 
-/** Market Value: multiplier for goal completion coins (1.0 + 0.8 per level). Capped at level 5 (5.0x). */
+/** Market Value: +0.2× per purchase, max 3.0× (reached at level 10). */
 export const getMarketValueMultiplier = (harvestState: HarvestState): number => {
   const level = harvestState?.market_value?.level ?? 0;
-  return 1 + 0.8 * Math.min(5, level);
+  return Math.min(3, 1 + 0.2 * level);
 };
 
 export const isMarketValueMaxed = (harvestState: Record<string, UpgradeState>): boolean => {
   const level = harvestState?.market_value?.level ?? 0;
-  return level >= 5;
+  return level >= 10;
 };
 
 /** Premium Orders: minimum level for 50% above chance (1 + level). When creating order, 50% chance plant is above this. */

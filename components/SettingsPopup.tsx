@@ -161,7 +161,7 @@ export const SettingsPopup: React.FC<SettingsPopupProps> = ({
               backgroundColor: '#fcf0c6',
               boxShadow: '0 1px 14px rgba(0,0,0,0.96), inset 0 0 0 1.5px #e9dcaf',
               border: '2px solid rgba(180, 165, 130, 0.4)',
-              padding: '36px 20px 32px',
+              padding: '36px 20px 14px',
             }}
           >
             <div className="flex flex-col items-center">
@@ -171,7 +171,6 @@ export const SettingsPopup: React.FC<SettingsPopupProps> = ({
               <div className="w-full flex items-center justify-center" style={{ marginTop: '8px', marginBottom: '14px' }}>
                 <img src={assetPath('/assets/popups/popup_divider.png')} alt="" className="h-auto object-contain" style={{ width: '100%', maxWidth: '220px' }} />
               </div>
-
               <div className="flex flex-col items-center gap-3 w-full" style={{ maxWidth: '200px' }}>
                 <button
                   type="button"
@@ -246,6 +245,19 @@ export const SettingsPopup: React.FC<SettingsPopupProps> = ({
                     </span>
                   </button>
                 ) : null}
+                <div
+                  className="text-center"
+                  style={{
+                    marginTop: '4px',
+                    color: '#8d7c5d',
+                    fontFamily: 'Inter, sans-serif',
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                    letterSpacing: '0.01em',
+                  }}
+                >
+                  v0.01
+                </div>
               </div>
             </div>
           </div>
