@@ -432,8 +432,8 @@ const CROPS_UPGRADES: UpgradeDef[] = [
 
 const HARVEST_UPGRADES: UpgradeDef[] = [
   { id: 'customer_speed', name: 'Order Speed', icon: assetPath('/assets/icons/icon_customerspeed.png'), description: 'Reduce the time it takes for new orders to appear' },
-  { id: 'seed_surplus', name: 'SURPLUS RECHARGES', icon: assetPath('/assets/icons/icon_seedsurplus.png'), description: 'Extra Harvest & Seed recharges sell for more coins' },
   { id: 'market_value', name: 'Market Value', icon: assetPath('/assets/icons/icon_marketvalue.png'), description: 'Increase the coins earned when completing orders' },
+  { id: 'seed_surplus', name: 'SURPLUS RECHARGES', icon: assetPath('/assets/icons/icon_seedsurplus.png'), description: 'Extra Harvest & Seed recharges sell for more coins' },
   { id: 'happy_customer', name: 'Happy Customer', icon: assetPath('/assets/icons/icon_happycustomer.png'), description: 'Increase chance that customers pay double for orders' },
 ];
 

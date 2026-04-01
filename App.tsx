@@ -6381,12 +6381,6 @@ export default function App() {
                         setCollectionFtuePhase('intro_cta');
                       }
                     }
-                    if (unlockInfo.upgradeId === 'market_value') {
-                      setHarvestState((prev) => ({
-                        ...prev,
-                        market_value: { level: 1, progress: 0 },
-                      }));
-                    }
                     if (unlockInfo.upgradeId === 'seed_surplus') {
                       setSeedsState((prev) => ({
                         ...prev,
