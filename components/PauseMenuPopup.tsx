@@ -20,8 +20,6 @@ interface PauseMenuPopupProps {
   onAddMoney?: (amount: number) => void;
   /** Reset economy + progression to post–FTUE 11, level 1 (no tutorial replay). */
   onClearProgress?: () => void;
-  /** Remove all active boosts (bar + timers + gameplay effects). */
-  onClearBoosts?: () => void;
   /** Lock every shed shelf again (no collection unlocks). */
   onClearShed?: () => void;
   /** When false, Unlock Plant button is disabled (all plants unlocked) */
@@ -98,7 +96,6 @@ export const PauseMenuPopup: React.FC<PauseMenuPopupProps> = ({
   onGoldenPotClick,
   onAddMoney,
   onClearProgress,
-  onClearBoosts,
   onClearShed,
   canUnlockPlant = true,
   closeOnBackdropClick = true,
@@ -111,7 +108,6 @@ export const PauseMenuPopup: React.FC<PauseMenuPopupProps> = ({
   const [goldenPotPressed, setGoldenPotPressed] = useState(false);
   const [addCoinsPressed, setAddCoinsPressed] = useState(false);
   const [clearProgressPressed, setClearProgressPressed] = useState(false);
-  const [clearBoostsPressed, setClearBoostsPressed] = useState(false);
   const [clearShedPressed, setClearShedPressed] = useState(false);
 
   const beginEnterAfterPreflight = useCallback(() => {
@@ -345,23 +341,7 @@ export const PauseMenuPopup: React.FC<PauseMenuPopupProps> = ({
                   </button>
                 ) : null}
                 {/* 6. Rewarded Ad — yellow */}
-                {/* 7. Clear Boosts — red */}
-                {onClearBoosts ? (
-                  <button
-                    type="button"
-                    onMouseDown={() => setClearBoostsPressed(true)}
-                    onMouseUp={() => setClearBoostsPressed(false)}
-                    onMouseLeave={() => setClearBoostsPressed(false)}
-                    onClick={() => onClearBoosts()}
-                    className="relative flex items-center justify-center rounded-lg transition-all w-full"
-                    style={settingsCheatButtonStyle(SETTINGS_PALETTES.red, clearBoostsPressed)}
-                  >
-                    <span className="font-bold tracking-tight" style={settingsCheatLabelStyle(SETTINGS_PALETTES.red)}>
-                      Clear Boosts
-                    </span>
-                  </button>
-                ) : null}
-                {/* 8. Clear Shed — red */}
+                {/* 7. Clear Shed — red */}
                 {onClearShed ? (
                   <button
                     type="button"

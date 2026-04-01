@@ -10,7 +10,7 @@ import { getPerformanceMode } from '../utils/performanceMode';
 const MOVE_DURATION_MS = 350;
 /** Shorter trail = fewer SVG elements when many coins fly at once (e.g. 5+ goals). */
 const MAX_TRAIL_POINTS = 8;
-const TRAIL_FADE_AFTER_HIT_MS = 220;
+const TRAIL_FADE_AFTER_HIT_MS = 280;
 const PARTICLE_SIZE = 40; // same as goal icon
 const TRAIL_COLOR = '#dfbb38';
 const TRAIL_STROKE_WIDTH = 32;
@@ -111,6 +111,8 @@ export const GoalCoinParticle: React.FC<GoalCoinParticleProps> = ({
   const trailOnlyStartRef = useRef<number>(0);
   const phaseRef = useRef<'moving' | 'trailOnly'>('moving');
   const rafRef = useRef<number>(0);
+  const mountedRef = useRef(true);
+  const completeScheduledRef = useRef(false);
   phaseRef.current = frame.phase;
 
   useEffect(() => {
@@ -119,6 +121,8 @@ export const GoalCoinParticle: React.FC<GoalCoinParticleProps> = ({
   }, [data.id, data.startX, data.startY]);
 
   useEffect(() => {
+    mountedRef.current = true;
+    completeScheduledRef.current = false;
     const container = containerRef.current;
     const walletEl = walletIconRef?.current ?? walletRef.current;
     if (!container || !walletEl) return;
@@ -134,7 +138,19 @@ export const GoalCoinParticle: React.FC<GoalCoinParticleProps> = ({
       };
     };
 
+    const finishAndDespawn = () => {
+      if (completeScheduledRef.current) return;
+      completeScheduledRef.current = true;
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = 0;
+      }
+      trailRef.current = [];
+      onComplete();
+    };
+
     const tick = () => {
+      if (!mountedRef.current) return;
       const now = Date.now();
       const elapsed = now - startTimeRef.current;
 
@@ -185,7 +201,7 @@ export const GoalCoinParticle: React.FC<GoalCoinParticleProps> = ({
             phaseRef.current = 'trailOnly';
             setFrame({ phase: 'trailOnly', pos: { x, y }, scale: coinScale, trail: [...trailRef.current], trailOpacity: 1 });
           } else {
-            onComplete();
+            finishAndDespawn();
             return;
           }
         } else {
@@ -204,11 +220,13 @@ export const GoalCoinParticle: React.FC<GoalCoinParticleProps> = ({
       if (phaseRef.current === 'trailOnly') {
         const trailElapsed = now - trailOnlyStartRef.current;
         const fade = Math.max(0, 1 - trailElapsed / trailFadeAfterHitMs);
-        if (fade <= 0) {
-          onComplete();
+        if (trailElapsed >= trailFadeAfterHitMs || fade <= 0.001) {
+          finishAndDespawn();
           return;
         }
-        setFrame((prev) => ({ ...prev, trailOpacity: fade, trail: [...trailRef.current] }));
+        if (mountedRef.current) {
+          setFrame((prev) => ({ ...prev, trailOpacity: fade, trail: [...trailRef.current] }));
+        }
         rafRef.current = requestAnimationFrame(tick);
         return;
       }
@@ -217,8 +235,13 @@ export const GoalCoinParticle: React.FC<GoalCoinParticleProps> = ({
     };
 
     rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [data, containerRef, walletRef, walletIconRef, appScale, onImpact, onComplete, useTrail, isPopupReward]);
+    return () => {
+      mountedRef.current = false;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+      trailRef.current = [];
+    };
+  }, [data, containerRef, walletRef, walletIconRef, appScale, onImpact, onComplete, useTrail, isPopupReward, trailFadeAfterHitMs, moveDurationMs]);
 
   const { phase, pos, scale, trail, trailOpacity } = frame;
 
@@ -227,7 +250,7 @@ export const GoalCoinParticle: React.FC<GoalCoinParticleProps> = ({
       {useTrail && trail.length > 1 && (
         <svg className="absolute inset-0 w-full h-full overflow-visible" style={{ pointerEvents: 'none' }}>
           {/* No blur filter to reduce GPU cost when many coins fly */}
-          <g style={{ opacity: trailOpacity }}>
+          <g>
             {trail.map((seg, i) => {
               if (i === 0) return null;
               const prev = trail[i - 1];
@@ -237,9 +260,10 @@ export const GoalCoinParticle: React.FC<GoalCoinParticleProps> = ({
               const taperProgress = (i - 1) / Math.max(1, trail.length - 2);
               const widthScale = baseWidthScale * (1 - taperProgress);
               const opacityScale = 1.0 - taperProgress;
+              const lineOpacity = Math.max(0, Math.min(1, opacityScale * trailOpacity));
               return (
                 <line
-                  key={`gcp-${i}`}
+                  key={`gcp-${data.id}-${i}`}
                   x1={prev.p.x}
                   y1={prev.p.y}
                   x2={curr.p.x}
@@ -247,7 +271,7 @@ export const GoalCoinParticle: React.FC<GoalCoinParticleProps> = ({
                   stroke={curr.color}
                   strokeWidth={trailStrokeWidth * widthScale}
                   strokeLinecap="round"
-                  strokeOpacity={opacityScale}
+                  strokeOpacity={lineOpacity}
                 />
               );
             })}

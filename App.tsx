@@ -6794,6 +6794,12 @@ export default function App() {
                 });
               }}
               onOpenDevTools={() => setDevToolsOpen(true)}
+              onClearBoosts={() => {
+                setBoostParticles([]);
+                setActiveBoosts([]);
+                setStoreFreeOfferSlots(pickInitialStoreFreeOfferSlots());
+                setStoreSlotCooldownEnds([0, 0]);
+              }}
               onResetProgress={() => {
                 if (
                   !window.confirm(
@@ -6851,12 +6857,6 @@ export default function App() {
                 completeMasterySegmentCheat();
               }}
               onAddMoney={(amount) => setMoney((prev) => prev + amount)}
-              onClearBoosts={() => {
-                setBoostParticles([]);
-                setActiveBoosts([]);
-                setStoreFreeOfferSlots(pickInitialStoreFreeOfferSlots());
-                setStoreSlotCooldownEnds([0, 0]);
-              }}
               onClearProgress={() => {
                 if (
                   !window.confirm('You will lose your progress and start from level 1 without the FTUE')

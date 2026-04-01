@@ -233,6 +233,7 @@ const formatCost = (cost: number): string => {
   return cost.toString();
 };
 
+/** Seeds tab list order (must match SEEDS_UNLOCK_LEVELS + level-up rows for that tab). */
 const SEEDS_UPGRADES: UpgradeDef[] = [
   { id: 'seed_production', name: 'Production Speed', icon: assetPath('/assets/icons/icon_seedproduction.png'), description: 'Increase how fast seeds are produced' },
   { id: 'double_seeds', name: 'DOUBLE SEEDS', icon: assetPath('/assets/icons/icon_seedquality.png'), description: 'Increase chance to spawn 2 seeds at a time' },
@@ -261,21 +262,21 @@ const HARVEST_UNLOCK_LEVELS: Record<string, number> = {
   happy_customer: 11,
 };
 
-/** Pricing tier: higher tier = higher strength multiplier in the same cost formula. */
+/** Pricing tier: controls per-purchase scaling multiplier. */
 export type UpgradeCostTier = 'normal' | 'medium' | 'high';
 
-/** Strength multipliers per tier (used in base cost formulas). */
+/** Scaling multipliers per tier (used after first purchase). */
 export const UPGRADE_COST_STRENGTH: Record<UpgradeCostTier, number> = {
-  normal: 1.5,
+  normal: 1.8,
   medium: 2.0,
-  high: 2.5,
+  high: 2.2,
 };
 
 /**
- * Which tier each upgrade uses. Unlisted ids default to `normal` in `getUpgradeCostStrength`.
- * Normal: Production Speed, Harvest Speed, Order Speed, Double Seed, Lucky Seed, Wild Growth, Surplus Recharges (+ other standard upgrades).
- * Medium: Crop Yield, Happy Customer.
- * High: Garden Expansion, Market Value.
+ * Which scaling tier each upgrade uses. Unlisted ids default to `normal`.
+ * Current design: universal normal scaling for all upgrades.
+ * Note: Garden Expansion (`plot_expansion`) ignores tiers and always uses
+ * its dedicated special-case cost curve in `calculateUpgradeCost`.
  */
 export const UPGRADE_COST_TIER_BY_ID: Record<string, UpgradeCostTier> = {
   seed_production: 'normal',
@@ -288,20 +289,44 @@ export const UPGRADE_COST_TIER_BY_ID: Record<string, UpgradeCostTier> = {
   seed_surplus: 'normal',
   merge_harvest: 'normal',
   surplus_sales: 'normal',
-  crop_value: 'medium',
-  happy_customer: 'medium',
-  plot_expansion: 'high',
-  market_value: 'high',
+  premium_orders: 'normal',
+  fertile_soil: 'normal',
+  crop_value: 'normal',
+  happy_customer: 'normal',
+  plot_expansion: 'normal',
+  market_value: 'normal',
 };
 
-/** Upgrade cost formula: base = round(avgGoalValue × unlockLevel × strength × scale), then each purchase = round(previous × UPGRADE_GROWTH_MULTIPLIER). All to nearest 5.
- * Garden Expansion + Crop Yield: first = round(anchor × unlockLevel × tierStrength / highTierStrength) (Garden anchor 500 → 1000 at unlock 2; Crop Yield anchor 1500), then each = previous × 3.0.
+/**
+ * Initial cost formula:
+ * - first = 150 × max(1, unlockLevel × 0.7)
+ *
+ * Scaling formula:
+ * - next = previous × tierScale (normal/medium/high)
+ *
+ * Final rounding:
+ * - < 100 -> nearest 10
+ * - < 1,000 -> nearest 25
+ * - < 10,000 -> nearest 100
+ * - < 100,000 -> nearest 1,000
+ * - >= 100,000 -> nearest 1,000
+ *
+ * Every purchasable upgrade uses `calculateUpgradeCost` → `roundUpgradeCost` (panel + `handleUpgrade` only).
  */
-const AVG_GOAL_VALUE = 50;
-const UPGRADE_COST_SCALE = 1.5;
-const UPGRADE_GROWTH_MULTIPLIER = 2.5;
+const INITIAL_COST_BASE = 150;
+const PLOT_EXPANSION_INITIAL_COST_BASE = 1000;
+const PLOT_EXPANSION_SCALE = 1.3;
+const INITIAL_COST_UNLOCK_MULTIPLIER = 0.7;
+const INITIAL_COST_MIN_UNLOCK_FACTOR = 1;
 
-const roundToNearest5 = (value: number): number => Math.round(value / 5) * 5;
+/** Single rounding path for all upgrade prices (export for tests / tooling). */
+export function roundUpgradeCost(value: number): number {
+  if (value < 100) return Math.round(value / 10) * 10;
+  if (value < 1000) return Math.round(value / 25) * 25;
+  if (value < 10000) return Math.round(value / 100) * 100;
+  if (value < 100000) return Math.round(value / 1000) * 1000;
+  return Math.round(value / 1000) * 1000;
+}
 
 const getUpgradeUnlockLevel = (upgradeId: string): number =>
   SEEDS_UNLOCK_LEVELS[upgradeId] ?? CROPS_UNLOCK_LEVELS[upgradeId] ?? HARVEST_UNLOCK_LEVELS[upgradeId] ?? 1;
@@ -311,36 +336,30 @@ const getUpgradeCostStrength = (upgradeId: string): number => {
   return UPGRADE_COST_STRENGTH[tier];
 };
 
-/**
- * Calculate upgrade cost for the next purchase (currentLevel = level before buying).
- * baseUpgradeCost = round(avgGoalValue × unlockLevel × strength × scale) to nearest 5.
- * Then for each purchase after: nextUpgradeCost = round(previous × UPGRADE_GROWTH_MULTIPLIER) to nearest 5.
- * Garden Expansion + Crop Yield: first cost uses per-upgrade anchor × unlock (plot_expansion: 500×unlockLevel, 1000 at level 2), then ×3.0 per level.
- * This is the only cost used by the upgrade panel and handleUpgrade.
- */
-const calculateUpgradeCost = (upgradeId: string, currentLevel: number): number => {
+/** Next purchase cost (currentLevel = level before buying). Single source for all upgrades. */
+export function calculateUpgradeCost(upgradeId: string, currentLevel: number): number {
   if (currentLevel < 0) return 0;
 
-  const strength = getUpgradeCostStrength(upgradeId);
-  const unlockLevel = getUpgradeUnlockLevel(upgradeId);
-
-  if (upgradeId === 'plot_expansion' || upgradeId === 'crop_value') {
-    const highAnchor = UPGRADE_COST_STRENGTH.high;
-    const anchorBase = upgradeId === 'plot_expansion' ? 500 : 1500;
-    let cost = roundToNearest5((anchorBase * unlockLevel * strength) / highAnchor);
+  // Garden Expansion uses a fixed special-case curve:
+  // initial = 1000, then previous x 1.3 (same rounding buckets).
+  if (upgradeId === 'plot_expansion') {
+    let cost = roundUpgradeCost(PLOT_EXPANSION_INITIAL_COST_BASE);
     for (let i = 0; i < currentLevel; i++) {
-      cost = roundToNearest5(cost * 3.0);
+      cost = roundUpgradeCost(cost * PLOT_EXPANSION_SCALE);
     }
-    return roundToNearest5(cost);
+    return cost;
   }
 
-  let cost = roundToNearest5(AVG_GOAL_VALUE * unlockLevel * strength * UPGRADE_COST_SCALE);
+  const tierScale = getUpgradeCostStrength(upgradeId);
+  const unlockLevel = getUpgradeUnlockLevel(upgradeId);
+  const unlockFactor = Math.max(INITIAL_COST_MIN_UNLOCK_FACTOR, unlockLevel * INITIAL_COST_UNLOCK_MULTIPLIER);
+  let cost = roundUpgradeCost(INITIAL_COST_BASE * unlockFactor);
 
   for (let i = 0; i < currentLevel; i++) {
-    cost = roundToNearest5(cost * UPGRADE_GROWTH_MULTIPLIER);
+    cost = roundUpgradeCost(cost * tierScale);
   }
   return cost;
-};
+}
 
 /** Highest player level that shows a scripted unlock popup (Plant Collection at 5 … Happy Customers at 11). */
 export const MAX_LEVEL_WITH_CUSTOM_UNLOCK_POPUP = 11;
@@ -423,6 +442,7 @@ export const getLevelUnlockInfo = (level: number): LevelUnlockInfo => {
 const ICON_LOCK = assetPath('/assets/icons/icon_lock.png');
 const ICON_COIN_SMALL = assetPath('/assets/icons/icon_coin_small.png');
 
+/** Crops tab list order (must match CROPS_UNLOCK_LEVELS + level-up rows for that tab). */
 const CROPS_UPGRADES: UpgradeDef[] = [
   { id: 'harvest_speed', name: 'Harvest Speed', icon: assetPath('/assets/icons/icon_harvestspeed.png'), description: 'Increase automatic harvest cycle speed' },
   { id: 'plot_expansion', name: 'Garden Expansion', icon: assetPath('/assets/icons/icon_plotexpansion.png'), description: 'Unlock additional plots in the garden' },
@@ -430,6 +450,7 @@ const CROPS_UPGRADES: UpgradeDef[] = [
   { id: 'crop_value', name: 'Crop Yield', icon: assetPath('/assets/icons/icon_cropvalue.png'), description: 'Plants produce more crops per harvest' },
 ];
 
+/** Harvest tab order = vertical list order. Unlock scroll uses `upgradeRowRefs[upgrade.id]` — keep in sync with HARVEST_UNLOCK_LEVELS / getLevelUnlockInfo. */
 const HARVEST_UPGRADES: UpgradeDef[] = [
   { id: 'customer_speed', name: 'Order Speed', icon: assetPath('/assets/icons/icon_customerspeed.png'), description: 'Reduce the time it takes for new orders to appear' },
   { id: 'market_value', name: 'Market Value', icon: assetPath('/assets/icons/icon_marketvalue.png'), description: 'Increase the coins earned when completing orders' },
@@ -691,13 +712,21 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
       if (el && scrollContainer) {
         const containerRect = scrollContainer.getBoundingClientRect();
         const elRect = el.getBoundingClientRect();
-        const offsetTop = elRect.top - containerRect.top + scrollContainer.scrollTop;
-        const elHeight = elRect.height;
+        const elTopInContent = elRect.top - containerRect.top + scrollContainer.scrollTop;
+        const elBottomInContent = elTopInContent + elRect.height;
         const containerHeight = scrollContainer.clientHeight;
         const maxScroll = scrollContainer.scrollHeight - containerHeight;
-        // Center the upgrade in the viewport so it's fully visible (was scrolling past and cutting off top)
-        const centerTarget = offsetTop - (containerHeight / 2) + (elHeight / 2);
-        const scrollTarget = Math.max(0, Math.min(maxScroll, centerTarget));
+        const scrollTop = scrollContainer.scrollTop;
+        const padTop = 12;
+        const padBottom = 12;
+        // Minimal scroll so the row is fully visible — avoids over-scrolling past the target (e.g. Market Value).
+        let scrollTarget = scrollTop;
+        if (elTopInContent < scrollTop + padTop) {
+          scrollTarget = elTopInContent - padTop;
+        } else if (elBottomInContent > scrollTop + containerHeight - padBottom) {
+          scrollTarget = elBottomInContent - containerHeight + padBottom;
+        }
+        scrollTarget = Math.max(0, Math.min(maxScroll, scrollTarget));
         const startTop = scrollContainer.scrollTop;
         const distance = scrollTarget - startTop;
         const startTime = Date.now();
@@ -764,12 +793,20 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
       if (el && scrollContainer) {
         const containerRect = scrollContainer.getBoundingClientRect();
         const elRect = el.getBoundingClientRect();
-        const offsetTop = elRect.top - containerRect.top + scrollContainer.scrollTop;
-        const elHeight = elRect.height;
+        const elTopInContent = elRect.top - containerRect.top + scrollContainer.scrollTop;
+        const elBottomInContent = elTopInContent + elRect.height;
         const containerHeight = scrollContainer.clientHeight;
         const maxScroll = scrollContainer.scrollHeight - containerHeight;
-        const centerTarget = offsetTop - (containerHeight / 2) + (elHeight / 2);
-        const scrollTarget = Math.max(0, Math.min(maxScroll, centerTarget));
+        const scrollTop = scrollContainer.scrollTop;
+        const padTop = 12;
+        const padBottom = 12;
+        let scrollTarget = scrollTop;
+        if (elTopInContent < scrollTop + padTop) {
+          scrollTarget = elTopInContent - padTop;
+        } else if (elBottomInContent > scrollTop + containerHeight - padBottom) {
+          scrollTarget = elBottomInContent - containerHeight + padBottom;
+        }
+        scrollTarget = Math.max(0, Math.min(maxScroll, scrollTarget));
         const startTop = scrollContainer.scrollTop;
         const distance = scrollTarget - startTop;
         const startTime = Date.now();

@@ -8,6 +8,7 @@ interface SettingsPopupProps {
   isVisible: boolean;
   onClose: () => void;
   onOpenDevTools: () => void;
+  onClearBoosts?: () => void;
   onResetProgress?: () => void;
   showAutoMergeSetting?: boolean;
   onAutoMergeChange?: (enabled: boolean) => void;
@@ -68,6 +69,7 @@ export const SettingsPopup: React.FC<SettingsPopupProps> = ({
   isVisible,
   onClose,
   onOpenDevTools,
+  onClearBoosts,
   onResetProgress,
   showAutoMergeSetting = false,
   onAutoMergeChange,
@@ -78,6 +80,7 @@ export const SettingsPopup: React.FC<SettingsPopupProps> = ({
   const [performanceMode, setPerformanceModeLocal] = useState(false);
   const [autoMergeMode, setAutoMergeModeLocal] = useState(false);
   const [devToolsPressed, setDevToolsPressed] = useState(false);
+  const [clearBoostsPressed, setClearBoostsPressed] = useState(false);
   const [resetPressed, setResetPressed] = useState(false);
 
   useEffect(() => {
@@ -230,6 +233,22 @@ export const SettingsPopup: React.FC<SettingsPopupProps> = ({
                   </span>
                 </button>
 
+                {onClearBoosts ? (
+                  <button
+                    type="button"
+                    onMouseDown={() => setClearBoostsPressed(true)}
+                    onMouseUp={() => setClearBoostsPressed(false)}
+                    onMouseLeave={() => setClearBoostsPressed(false)}
+                    onClick={onClearBoosts}
+                    className="relative flex items-center justify-center rounded-lg transition-all w-full"
+                    style={btnStyle(PALETTES.red, clearBoostsPressed)}
+                  >
+                    <span className="font-bold tracking-tight" style={labelStyle(PALETTES.red)}>
+                      Clear Boosts
+                    </span>
+                  </button>
+                ) : null}
+
                 {onResetProgress ? (
                   <button
                     type="button"
@@ -256,7 +275,7 @@ export const SettingsPopup: React.FC<SettingsPopupProps> = ({
                     letterSpacing: '0.01em',
                   }}
                 >
-                  v0.03
+                  v0.04
                 </div>
               </div>
             </div>
