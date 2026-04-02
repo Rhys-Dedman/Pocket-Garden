@@ -1696,8 +1696,17 @@ export default function App() {
     const r = btn.getBoundingClientRect();
     setHarvestButtonRect(toContainerRect(r));
   }, [toContainerRect]);
-  useEffect(() => {
-    if (activeFtueStage !== 'first_harvest' && activeFtueStage !== 'first_harvest_multi' && activeFtueStage !== 'first_upgrade') return;
+  // Measure harvest button before paint whenever it is visible in the FTUE chain so FTUE 8 has a rect the same frame it mounts.
+  useLayoutEffect(() => {
+    if (
+      activeFtueStage !== 'first_harvest' &&
+      activeFtueStage !== 'first_goal_collect' &&
+      activeFtueStage !== 'first_more_orders' &&
+      activeFtueStage !== 'first_harvest_multi' &&
+      activeFtueStage !== 'first_upgrade'
+    ) {
+      return;
+    }
     updateHarvestButtonRect();
     window.addEventListener('resize', updateHarvestButtonRect);
     const raf = requestAnimationFrame(updateHarvestButtonRect);
@@ -3213,6 +3222,8 @@ export default function App() {
     if (activeFtueStage === 'seed_tap' && (ftue2SeedFireCount >= 2 || ftue2SeedsBlockedRef.current)) return;
     // FTUE_3: seeds button blocked during merge-drag step
     if (activeFtueStage === 'merge_drag') return;
+    // FTUE_7→8: block extra seed taps while the "more orders" overlay is fading out (stage may already be first_harvest_multi)
+    if (ftue7FadingOut) return;
     // FTUE_7: must tap exactly 2 times; block 3rd tap
     if (activeFtueStage === 'first_more_orders' && ftue7SeedFireCount >= 2) return;
 
@@ -3259,6 +3270,8 @@ export default function App() {
             const next = c + 1;
             if (next >= 2) {
               setFtue7FadingOut(true);
+              // 0.5s beat after second seed, then FTUE 8 (still overlaps FTUE 7 fade for a smooth handoff)
+              setTimeout(() => setActiveFtueStage('first_harvest_multi'), 500);
             }
             return next;
           });
@@ -5368,6 +5381,9 @@ export default function App() {
                   onTabChange={handleTabChange}
                   tabsWithOffers={tabsWithOffers}
                   isExpanded={isExpanded}
+                  ftue10EmphasizeGardenTab={
+                    activeFtueStage === 'first_upgrade' && ftue10Phase === 'panel_open_orders'
+                  }
                 />
                 <div className="flex-grow min-h-0 overflow-hidden relative flex flex-col">
                   <UpgradeList 
@@ -6295,7 +6311,6 @@ export default function App() {
                 onFadeOutComplete={() => {
                   setFtue7FadingOut(false);
                   setFtue7SeedFireCount(0);
-                  setActiveFtueStage('first_harvest_multi'); // FTUE 8 starts immediately after FTUE 7 fades out
                 }}
               />
             )}

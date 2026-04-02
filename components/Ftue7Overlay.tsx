@@ -31,6 +31,8 @@ export const Ftue7Overlay: React.FC<Ftue7OverlayProps> = ({
 
   useEffect(() => {
     if (!isActive || !buttonRect) {
+      // Keep fade-out visible while stage switches to FTUE 8 (isActive false, isFadingOut true)
+      if (isFadingOut) return;
       setOpacity(0);
       setFadeInDone(false);
       return;
@@ -41,7 +43,7 @@ export const Ftue7Overlay: React.FC<Ftue7OverlayProps> = ({
       setFadeInDone(true);
     }, 50);
     return () => clearTimeout(t);
-  }, [isActive, buttonRect]);
+  }, [isActive, buttonRect, isFadingOut]);
 
   useEffect(() => {
     if (!isFadingOut) return;
@@ -60,6 +62,7 @@ export const Ftue7Overlay: React.FC<Ftue7OverlayProps> = ({
   const tapRight = FINGER_TAP_RIGHT;
   const tapDown = FINGER_TAP_DOWN;
 
+  const blockPointer = isActive;
   return (
     <div
       className="absolute inset-0 pointer-events-none"
@@ -67,10 +70,22 @@ export const Ftue7Overlay: React.FC<Ftue7OverlayProps> = ({
     >
       {buttonRect && (
         <div className="absolute inset-0 pointer-events-none" style={{ backgroundColor: 'transparent' }}>
-          <div className="absolute left-0 top-0 right-0 pointer-events-auto" style={{ height: buttonRect.top, backgroundColor: FTUE_BLOCKER_TINT }} />
-          <div className="absolute left-0 pointer-events-auto" style={{ top: buttonRect.top, width: buttonRect.left, height: buttonRect.height, backgroundColor: FTUE_BLOCKER_TINT }} />
-          <div className="absolute top-0 bottom-0 pointer-events-auto" style={{ left: buttonRight, right: 0, backgroundColor: FTUE_BLOCKER_TINT }} />
-          <div className="absolute left-0 right-0 bottom-0 pointer-events-auto" style={{ top: buttonBottom, backgroundColor: FTUE_BLOCKER_TINT }} />
+          <div
+            className="absolute left-0 top-0 right-0"
+            style={{ height: buttonRect.top, backgroundColor: FTUE_BLOCKER_TINT, pointerEvents: blockPointer ? 'auto' : 'none' }}
+          />
+          <div
+            className="absolute left-0"
+            style={{ top: buttonRect.top, width: buttonRect.left, height: buttonRect.height, backgroundColor: FTUE_BLOCKER_TINT, pointerEvents: blockPointer ? 'auto' : 'none' }}
+          />
+          <div
+            className="absolute top-0 bottom-0"
+            style={{ left: buttonRight, right: 0, backgroundColor: FTUE_BLOCKER_TINT, pointerEvents: blockPointer ? 'auto' : 'none' }}
+          />
+          <div
+            className="absolute left-0 right-0 bottom-0"
+            style={{ top: buttonBottom, backgroundColor: FTUE_BLOCKER_TINT, pointerEvents: blockPointer ? 'auto' : 'none' }}
+          />
         </div>
       )}
 

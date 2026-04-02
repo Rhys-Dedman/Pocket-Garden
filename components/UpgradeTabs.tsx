@@ -1,6 +1,12 @@
-import React, { useRef, useImperativeHandle, forwardRef } from 'react';
+import React, { useRef, useImperativeHandle, forwardRef, useLayoutEffect, useState } from 'react';
 import { TabType } from '../types';
 import { assetPath } from '../utils/assetPath';
+
+/** FTUE 10: flat chip — same greens as UpgradeList affordable purchase button (not the row flash). */
+const FTUE10_GARDEN_HIGHLIGHT_FILL = '#cae060'; // buttonColor
+const FTUE10_GARDEN_HIGHLIGHT_BORDER = '#9db546'; // buttonDepthColor / border
+const FTUE10_GARDEN_TAB_TEXT = '#587e26'; // buttonFontColor (price text on green purchase)
+const FTUE10_GARDEN_HIGHLIGHT_FADE_MS = 280;
 
 interface UpgradeTabsProps {
   activeTab: TabType;
@@ -9,6 +15,11 @@ interface UpgradeTabsProps {
   tabsWithOffers?: Set<TabType>;
   /** When true, panel is expanded (use stronger ease-out for opening) */
   isExpanded?: boolean;
+  /**
+   * FTUE 10: while Garden must be tapped (panel_open_orders), show flat green rounded rect + full-color icon + purchase-style text.
+   * Fades out when the player taps Garden (prop goes false).
+   */
+  ftue10EmphasizeGardenTab?: boolean;
 }
 
 export interface UpgradeTabsRef {
@@ -31,8 +42,25 @@ const NOTIFICATION_COLOR = '#e6803a';
 const NOTIFICATION_UNDERLINE_COLOR = '#f59d42';
 const NORMAL_UNDERLINE_COLOR = '#a7c957';
 
-export const UpgradeTabs = forwardRef<UpgradeTabsRef, UpgradeTabsProps>(({ activeTab, onTabChange, tabsWithOffers = new Set(), isExpanded = false }, ref) => {
+export const UpgradeTabs = forwardRef<UpgradeTabsRef, UpgradeTabsProps>(
+  ({ activeTab, onTabChange, tabsWithOffers = new Set(), isExpanded = false, ftue10EmphasizeGardenTab = false }, ref) => {
   const tabs: TabType[] = ['SEEDS', 'CROPS', 'HARVEST'];
+
+  const [gardenHiMounted, setGardenHiMounted] = useState(false);
+  const [gardenHiOpaque, setGardenHiOpaque] = useState(true);
+
+  const emphasizeGardenRef = useRef(ftue10EmphasizeGardenTab);
+  emphasizeGardenRef.current = ftue10EmphasizeGardenTab;
+
+  useLayoutEffect(() => {
+    if (ftue10EmphasizeGardenTab) {
+      setGardenHiMounted(true);
+      setGardenHiOpaque(true);
+      return;
+    }
+    if (!gardenHiMounted) return;
+    setGardenHiOpaque(false);
+  }, [ftue10EmphasizeGardenTab, gardenHiMounted]);
   
   const tabRefs = useRef<Record<TabType, HTMLSpanElement | null>>({
     SEEDS: null,
@@ -58,6 +86,10 @@ export const UpgradeTabs = forwardRef<UpgradeTabsRef, UpgradeTabsProps>(({ activ
         const hasOffer = tabsWithOffers.has(tab);
         
         const getTextColor = () => {
+          // FTUE 10: Garden tab not yet selected — match purchase button text (full-color icon forced below)
+          if (tab === 'CROPS' && ftue10EmphasizeGardenTab && !isActive) {
+            return FTUE10_GARDEN_TAB_TEXT;
+          }
           // Active tab with offer = yellow
           if (isActive && hasOffer) return NOTIFICATION_COLOR;
           // Active tab without offer = green
@@ -67,6 +99,10 @@ export const UpgradeTabs = forwardRef<UpgradeTabsRef, UpgradeTabsProps>(({ activ
           // Inactive tab without offers = brown/tan
           return '#c2b280';
         };
+
+        const ftueGardenVisual =
+          tab === 'CROPS' && ftue10EmphasizeGardenTab && !isActive;
+        const showGardenHighlight = tab === 'CROPS' && gardenHiMounted;
 
         return (
           <button
@@ -81,17 +117,40 @@ export const UpgradeTabs = forwardRef<UpgradeTabsRef, UpgradeTabsProps>(({ activ
                 : undefined
             }
             onClick={() => onTabChange(tab)}
-            className={`flex-1 flex flex-row items-center justify-center space-x-1.5 transition-all duration-300 active:scale-95 h-full relative z-10`}
+            className={`flex-1 flex flex-row items-center justify-center space-x-1.5 transition-all duration-300 active:scale-95 h-full relative z-10 overflow-visible`}
             style={{ touchAction: 'manipulation' }}
           >
+            {showGardenHighlight && (
+              <div
+                className="absolute pointer-events-none rounded-[10px] z-0"
+                style={{
+                  left: 5,
+                  right: 5,
+                  top: 5,
+                  bottom: 5,
+                  backgroundColor: FTUE10_GARDEN_HIGHLIGHT_FILL,
+                  border: `2px solid ${FTUE10_GARDEN_HIGHLIGHT_BORDER}`,
+                  boxShadow: 'none',
+                  opacity: gardenHiOpaque ? 1 : 0,
+                  transition: `opacity ${FTUE10_GARDEN_HIGHLIGHT_FADE_MS}ms ease-out`,
+                }}
+                onTransitionEnd={(e) => {
+                  if (e.target !== e.currentTarget) return;
+                  if (e.propertyName !== 'opacity') return;
+                  if (!emphasizeGardenRef.current) setGardenHiMounted(false);
+                }}
+              />
+            )}
             <img
               src={TAB_ICONS[tab]}
               alt=""
-              className={`w-[12px] h-[12px] object-contain flex-shrink-0 filter saturate-[0.8] transition-all duration-300 -mt-[1px] ${isActive ? 'opacity-100' : 'opacity-40 grayscale'}`}
+              className={`relative z-[1] w-[12px] h-[12px] object-contain flex-shrink-0 filter saturate-[0.8] transition-all duration-300 -mt-[1px] ${
+                ftueGardenVisual || isActive ? 'opacity-100' : 'opacity-40 grayscale'
+              }`}
             />
             <span 
               ref={(el) => { tabRefs.current[tab] = el; }}
-              className="text-[11px] font-black tracking-[0.1em] transition-colors duration-300"
+              className="relative z-[1] text-[11px] font-black tracking-[0.1em] transition-colors duration-300"
               style={{ color: getTextColor() }}
             >
               {TAB_LABELS[tab]}

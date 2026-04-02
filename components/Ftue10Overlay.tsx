@@ -47,6 +47,8 @@ const PURCHASE_BLOCK_RIGHT_EXTRA_PX = 26 * FTUE_VISUAL_SCALE;
 /** Finger 3 (purchase) finger nudge */
 const PURCHASE_FINGER_NUDGE_LEFT_PX = 10 * FTUE_VISUAL_SCALE; // down-left
 const PURCHASE_FINGER_NUDGE_DOWN_PX = 6 * FTUE_VISUAL_SCALE;
+/** Garden tab finger: extra nudge left (smaller `left` = further left) */
+const GARDEN_FINGER_NUDGE_LEFT_PX = 18 * FTUE_VISUAL_SCALE;
 
 type Rect = { left: number; top: number; width: number; height: number };
 const rectRight = (r: Rect) => r.left + r.width;
@@ -321,7 +323,12 @@ export const Ftue10Overlay: React.FC<Ftue10OverlayProps> = ({
         <div
           className="absolute pointer-events-none"
           style={{
-            left: gardenTabRect.left + gardenTabRect.width / 2 - fingerSize / 2 - 40 * FTUE_VISUAL_SCALE,
+            left:
+              gardenTabRect.left +
+              gardenTabRect.width / 2 -
+              fingerSize / 2 -
+              40 * FTUE_VISUAL_SCALE -
+              GARDEN_FINGER_NUDGE_LEFT_PX,
             top: gardenTabRect.top - fingerSize - 135 * FTUE_VISUAL_SCALE,
             width: fingerSize,
             height: fingerSize,

@@ -64,7 +64,7 @@ export const Ftue8Overlay: React.FC<Ftue8OverlayProps> = ({
   return (
     <div
       className="absolute inset-0 pointer-events-none"
-      style={{ zIndex: 99, transition: `opacity ${isFadingOut ? FADE_OUT_MS : FADE_IN_MS}ms ease-out`, opacity: opacityValue }}
+      style={{ zIndex: 100, transition: `opacity ${isFadingOut ? FADE_OUT_MS : FADE_IN_MS}ms ease-out`, opacity: opacityValue }}
     >
       {buttonRect && isActive && !isFadingOut && (
         <div className="absolute inset-0 pointer-events-none" style={{ backgroundColor: 'transparent' }}>
