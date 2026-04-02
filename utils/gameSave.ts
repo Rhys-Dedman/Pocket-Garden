@@ -46,6 +46,19 @@ export const GAME_SAVE_STORAGE_KEY = 'pocket-garden-save-v1';
 
 export const GAME_SAVE_VERSION = 1 as const;
 
+/** Full buffer of normal goals before a +1 discovery order may spawn. Same curve as runtime discovery pacing. */
+export function getDiscoveryGoalBuffer(highestPlant: number): number {
+  const h = Math.max(0, Math.floor(highestPlant));
+  if (h <= 3) return 4;
+  if (h <= 4) return 6;
+  if (h <= 5) return 9;
+  if (h <= 6) return 12;
+  if (h <= 7) return 14;
+  if (h <= 8) return 16;
+  if (h <= 9) return 18;
+  return 20;
+}
+
 export interface GameSaveV1 {
   v: typeof GAME_SAVE_VERSION;
   savedAt: number;
@@ -97,7 +110,10 @@ export interface GameSaveV1 {
   coinGoalVisible: boolean;
   coinGoalValue: number;
   coinGoalTimeRemaining: number;
+  /** @deprecated Derived on save as `buffer - discoveryGoalsRemaining` for older readers. */
   newGoalsSinceDiscovery: number;
+  /** Goals remaining until a discovery order may spawn; authoritative when present. */
+  discoveryGoalsRemaining?: number;
   lastMergeDiscoveryLevel: number;
   lastSpawnedGoalLevels: [number, number];
   activeFtueStage: FtueStageId | null;

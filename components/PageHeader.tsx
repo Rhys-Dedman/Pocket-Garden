@@ -2,7 +2,7 @@
  * Top bar (coin wallet, level, active boosts, settings).
  * Reference UI: size/position locked — see docs/UI-REFERENCE-TOP-BAR.md.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { assetPath } from '../utils/assetPath';
 import { getTickCount60 } from '../utils/raf60';
 import { getPerformanceMode } from '../utils/performanceMode';
@@ -95,6 +95,15 @@ interface PageHeaderProps {
   headerLeftWrapperRef?: React.RefObject<HTMLDivElement | null>;
   /** Add this to boost area marginLeft (e.g. 20 on Store to push boosts right) */
   boostAreaMarginLeftOffset?: number;
+  /**
+   * Dev / testing: poll this ref and show "Last: Plant N" left of the FPS readout.
+   * Flex-end keeps FPS anchored when the label is visible.
+   */
+  debugLastSpawnedGoalLevelRef?: MutableRefObject<number> | null;
+  /**
+   * Dev / testing: poll this ref — remaining normal goal spawns until a discovery order (left of Last).
+   */
+  debugDiscoveryGoalsUntilRef?: MutableRefObject<number> | null;
 }
 
 const formatMoney = (amount: number | null | undefined): string => {
@@ -135,6 +144,8 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   onBoostClick,
   headerLeftWrapperRef,
   boostAreaMarginLeftOffset = 0,
+  debugLastSpawnedGoalLevelRef = null,
+  debugDiscoveryGoalsUntilRef = null,
 }) => {
   const isInteractive = !!walletRef;
   const boostRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -145,6 +156,8 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   const [bounceKey, setBounceKey] = useState(0);
   const [progressBarFlash, setProgressBarFlash] = useState(false);
   const [fps, setFps] = useState(0);
+  const [debugLastGoalLevel, setDebugLastGoalLevel] = useState(0);
+  const [debugDiscoveryGoalsUntil, setDebugDiscoveryGoalsUntil] = useState(0);
   const rafCountRef = useRef(0);
   const gameTickCountRef = useRef(0);
   const gameTickRef = useRef(0);
@@ -182,6 +195,29 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
   }, []);
+
+  useEffect(() => {
+    if (!debugLastSpawnedGoalLevelRef) return;
+    const poll = () => {
+      const v = debugLastSpawnedGoalLevelRef.current;
+      setDebugLastGoalLevel((prev) => (prev !== v ? v : prev));
+    };
+    poll();
+    const id = window.setInterval(poll, 100);
+    return () => clearInterval(id);
+  }, [debugLastSpawnedGoalLevelRef]);
+
+  useEffect(() => {
+    if (!debugDiscoveryGoalsUntilRef) return;
+    const poll = () => {
+      const v = debugDiscoveryGoalsUntilRef.current;
+      setDebugDiscoveryGoalsUntil((prev) => (prev !== v ? v : prev));
+    };
+    poll();
+    const id = window.setInterval(poll, 100);
+    return () => clearInterval(id);
+  }, [debugDiscoveryGoalsUntilRef]);
+
   useEffect(() => {
     if (walletBurstCount > prevBurstRef.current) {
       setBounceKey((k) => k + 1);
@@ -512,26 +548,49 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
         )}
       </div>
 
-      {/* FPS below boosts (z-20 < z-30); settings stays on top for taps */}
-      {!hideFpsReader && (
+      {/* FPS below boosts (z-20 < z-30); optional last-goal debug left of FPS */}
+      {(!hideFpsReader || debugLastSpawnedGoalLevelRef || debugDiscoveryGoalsUntilRef) && (
         <div
-          className="pointer-events-none absolute top-1/2 z-20 flex -translate-y-1/2 items-center"
+          className="pointer-events-none absolute top-1/2 z-20 flex -translate-y-1/2 flex-row items-center justify-end gap-1.5"
           style={{ right: FPS_RIGHT_OFFSET_PX }}
         >
-          <button
-            ref={fpsButtonRef}
-            type="button"
-            className="pointer-events-auto tabular-nums text-[10px] font-semibold select-none cursor-pointer hover:underline focus:outline-none"
-            style={{ color: '#c4a574', background: 'none', border: 'none', padding: 0 }}
-            aria-label={`${fps} FPS (click to simulate hitch)`}
-            title="Click to simulate a hitch — FPS should drop briefly if the counter is working"
-            onClick={() => {
-              const end = performance.now() + 250;
-              while (performance.now() < end) {}
-            }}
-          >
-            {fps} FPS
-          </button>
+          {debugDiscoveryGoalsUntilRef && (
+            <span
+              className="pointer-events-none min-w-[1.25rem] select-none whitespace-nowrap rounded border border-[#5c4035]/50 bg-black/35 px-1.5 py-0.5 text-center tabular-nums text-[10px] font-semibold leading-none"
+              style={{ color: '#c8e8a8' }}
+              title="Normal goal spawns remaining until discovery order (buffer − counter; ticks when a new normal order appears, not on coin tap)"
+            >
+              {debugDiscoveryGoalsUntil < 0 ? '—' : debugDiscoveryGoalsUntil}
+            </span>
+          )}
+          {debugLastSpawnedGoalLevelRef && (
+            <span
+              className="pointer-events-none select-none whitespace-nowrap rounded border border-[#5c4035]/50 bg-black/35 px-1.5 py-0.5 tabular-nums text-[10px] font-semibold leading-none"
+              style={{ color: '#e8d4a8' }}
+              title="Last committed goal plant tier (debug)"
+            >
+              Last:{' '}
+              {debugLastGoalLevel >= 1 && debugLastGoalLevel <= 24
+                ? `Plant ${debugLastGoalLevel}`
+                : '—'}
+            </span>
+          )}
+          {!hideFpsReader && (
+            <button
+              ref={fpsButtonRef}
+              type="button"
+              className="pointer-events-auto tabular-nums text-[10px] font-semibold select-none cursor-pointer hover:underline focus:outline-none"
+              style={{ color: '#c4a574', background: 'none', border: 'none', padding: 0 }}
+              aria-label={`${fps} FPS (click to simulate hitch)`}
+              title="Click to simulate a hitch — FPS should drop briefly if the counter is working"
+              onClick={() => {
+                const end = performance.now() + 250;
+                while (performance.now() < end) {}
+              }}
+            >
+              {fps} FPS
+            </button>
+          )}
         </div>
       )}
       <div className="absolute right-3 top-1/2 z-40 flex -translate-y-1/2 items-center">
