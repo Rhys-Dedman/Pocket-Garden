@@ -3,7 +3,7 @@ export const PLANT_MASTERY_ORDERS_PER_SEGMENT = 50;
 
 /**
  * Max stored `ordersProgress` while filling a segment (before rollover on the next goal).
- * When `introBarComplete`, plant 1 can sit at `seg` (50/50) until the next collected goal.
+ * Until `plantMasteryIntroBarComplete`, bar shows 15/15 (fake L4); after intro, normal level goals (e.g. 0/20 at L5).
  */
 export function getMaxStoredOrdersProgressForTarget(
   targetLevel: number,
