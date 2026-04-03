@@ -93,7 +93,9 @@ import {
   getPlantMasteryUnlockCost,
 } from './constants/plantMastery';
 import {
+  getGoldenPotBonusTierJustUnlocked,
   getHarvestRechargePerMinute,
+  getMaxPlantGoalSlots,
   getSeedRechargePerMinute,
   hasGoldenPotMergeCoinsDouble,
   hasGoldenPotOfflineEarningsDouble,
@@ -109,9 +111,11 @@ export function getCoinValueForLevel(level: number): number {
   return getPlantCoinValue(level);
 }
 
-/** Max plant goal slots: 3 until level 8 (Extra Orders), then 4. Slot 4 (5th) is reserved for coin goal only. */
-const getMaxGoalSlots = (playerLevel: number): number =>
-  playerLevel >= 8 ? 4 : 3;
+/** Max plant goal slots: 3 until 4 golden pots; 4 after Golden Pot bonus. Index 4 (5th slot) is coin goal only. */
+
+function firstThreePlantGoalSlotsFilled(slots: ('empty' | 'loading' | 'green' | 'completed')[]): boolean {
+  return [0, 1, 2].every((i) => (slots[i] ?? 'empty') !== 'empty');
+}
 
 /** Plant Collection barn UI (shelves, mastery bar, bonuses button) — navigation stays open; data keeps updating while locked. */
 const PLANT_COLLECTION_UI_UNLOCK_LEVEL = 5;
@@ -1076,6 +1080,8 @@ export default function App() {
   
   const [activeTab, setActiveTab] = useState<TabType>('SEEDS');
   const [activeScreen, setActiveScreen] = useState<ScreenType>('FARM');
+  const activeScreenRef = useRef<ScreenType>(activeScreen);
+  activeScreenRef.current = activeScreen;
   const [isExpanded, setIsExpanded] = useState(false);
   const panelHeight = useAnimatedPanelHeight(isExpanded);
   const [money, setMoney] = useState(0);
@@ -1107,6 +1113,10 @@ export default function App() {
   // Discovery popup state
   const [discoveryPopup, setDiscoveryPopup] = useState<{ isVisible: boolean; level: number } | null>(null);
   const [goldenPotBonusesPopupOpen, setGoldenPotBonusesPopupOpen] = useState(false);
+  /** Auto-reveal this tier row (disabled → green) in bonuses popup after golden pot bounce + open. */
+  const [goldenPotBonusRevealTier, setGoldenPotBonusRevealTier] = useState<number | null>(null);
+  const goldenPotTierUnlockPopupTimeoutRef = useRef<number | null>(null);
+  const goldenPotCountForTierPopupRef = useRef<number | null>(null);
   /** First-time collection flow after level 5 (golden pot + bonuses + garden hint). */
   const [collectionFtuePhase, setCollectionFtuePhase] = useState<CollectionFtuePhase | null>(null);
   const [collectionFtueCompleted, setCollectionFtueCompleted] = useState(false);
@@ -1255,7 +1265,7 @@ export default function App() {
   const [seenMasteryUnlockLevels, setSeenMasteryUnlockLevels] = useState<number[]>([]);
   const [barnAttentionBounceLevels, setBarnAttentionBounceLevels] = useState<number[]>([]);
   const [unlockingCellIndices, setUnlockingCellIndices] = useState<number[]>([]); // Cells currently playing unlock animation
-  // Goals: 3 slots until player level 8 (Extra Orders unlock); then 4 plant goal slots. Slot 4 (5th) is coin goal only.
+  // Goals: 3 plant slots until 4 golden pots; then 4. Slot index 4 is coin goal only.
   const [goalSlots, setGoalSlots] = useState<('empty' | 'loading' | 'green' | 'completed')[]>(['green', 'green', 'green', 'empty', 'empty']);
   const [goalPlantTypes, setGoalPlantTypes] = useState<number[]>([1, 2, 3, 0, 0]); // plant level 1-5 per slot when green
   const goalSlotsRef = useRef(goalSlots);
@@ -1385,6 +1395,37 @@ export default function App() {
     plantMasteryIntroBarComplete: false,
   });
   const goldenPotCount = plantMastery.unlockedLevels.length;
+  const goldenPotCountRef = useRef(goldenPotCount);
+  goldenPotCountRef.current = goldenPotCount;
+  /** Defer starting loading in plant goal slot 3 until player returns to FARM (see fourth-slot unlock flow). */
+  const pendingFourthPlantGoalSlotRef = useRef(false);
+
+  useEffect(() => {
+    const n = plantMastery.unlockedLevels.length;
+    if (goldenPotCountForTierPopupRef.current === null) {
+      goldenPotCountForTierPopupRef.current = n;
+      return;
+    }
+    const prev = goldenPotCountForTierPopupRef.current;
+    goldenPotCountForTierPopupRef.current = n;
+    if (n <= prev) return;
+    const tier = getGoldenPotBonusTierJustUnlocked(prev, n);
+    if (tier == null) return;
+    if (goldenPotTierUnlockPopupTimeoutRef.current != null) {
+      window.clearTimeout(goldenPotTierUnlockPopupTimeoutRef.current);
+    }
+    goldenPotTierUnlockPopupTimeoutRef.current = window.setTimeout(() => {
+      goldenPotTierUnlockPopupTimeoutRef.current = null;
+      setGoldenPotBonusRevealTier(tier);
+      setGoldenPotBonusesPopupOpen(true);
+    }, 650);
+    return () => {
+      if (goldenPotTierUnlockPopupTimeoutRef.current != null) {
+        window.clearTimeout(goldenPotTierUnlockPopupTimeoutRef.current);
+        goldenPotTierUnlockPopupTimeoutRef.current = null;
+      }
+    };
+  }, [plantMastery.unlockedLevels.length]);
   const [masteryPurchaseRevealLevels, setMasteryPurchaseRevealLevels] = useState<number[]>([]);
   const masteryPurchaseRevealTimeoutRef = useRef<number | null>(null);
 
@@ -2804,19 +2845,25 @@ export default function App() {
       requestAnimationFrame(() => requestAnimationFrame(() => setGoalTransitionFade(true)));
       setTimeout(() => {
         lastProcessedGoalLoadingSlotRef.current = null;
-        const maxSlots = getMaxGoalSlots(playerLevel);
-        const firstEmptyIdx = goalSlots.findIndex((s, i) => s === 'empty' && i < maxSlots);
+        const slotsNow = goalSlotsRef.current;
+        const maxSlots = getMaxPlantGoalSlots(goldenPotCountRef.current);
+        const firstEmptyIdx = slotsNow.findIndex((s, i) => s === 'empty' && i < maxSlots);
+        const deferFourthSlotLoad =
+          firstEmptyIdx === 3 &&
+          activeScreenRef.current !== 'FARM' &&
+          firstThreePlantGoalSlotsFilled(slotsNow);
+        if (deferFourthSlotLoad) pendingFourthPlantGoalSlotRef.current = true;
         setGoalBounceSlots((prev) => prev.filter((s) => s !== loadingIdx));
         setGoalSlots((slotsIn) => {
           const next = [...slotsIn];
           next[loadingIdx] = 'green';
-          if (firstEmptyIdx >= 0) next[firstEmptyIdx] = 'loading';
+          if (firstEmptyIdx >= 0 && !deferFourthSlotLoad) next[firstEmptyIdx] = 'loading';
           return next;
         });
-        if (firstEmptyIdx >= 0) {
+        if (firstEmptyIdx >= 0 && !deferFourthSlotLoad) {
           setGoalDisplayOrder((prev) => (prev.includes(firstEmptyIdx) ? prev : [...prev, firstEmptyIdx]));
           setGoalSlotFadeInSlot(firstEmptyIdx);
-          setGoalLoadingSeconds(rush ? 0 : getGoalLoadingSeconds(harvestState, goldenPotCount));
+          setGoalLoadingSeconds(rush ? 0 : getGoalLoadingSeconds(harvestState, goldenPotCountRef.current));
           setTimeout(() => setGoalSlotFadeInSlot(null), 500);
         }
         setGoalTransitionSlot(null);
@@ -2950,23 +2997,52 @@ export default function App() {
     ftue11ThreePlantGoalWindowActive,
   ]);
 
-  // When player levels up and unlocks a new goal slot, start loading in that slot if empty and no other loading
+  // When 4th plant slot unlocks (golden pots), start loading in slot 3 if empty and no other loading
   useEffect(() => {
     if (isLoading) return;
-    const maxSlots = getMaxGoalSlots(playerLevel);
+    const maxSlots = getMaxPlantGoalSlots(goldenPotCount);
     const hasLoading = goalSlots.some((s) => s === 'loading');
     if (hasLoading) return;
     for (let i = 3; i < maxSlots; i++) {
-      if (goalSlots[i] === 'empty') {
-        setGoalSlots((s) => { const n = [...s]; n[i] = 'loading'; return n; });
-        setGoalDisplayOrder((prev) => (prev.includes(i) ? prev : [...prev, i]));
-        setGoalSlotFadeInSlot(i);
-        setGoalLoadingSeconds(getGoalLoadingSeconds(harvestState, goldenPotCount));
-        setTimeout(() => setGoalSlotFadeInSlot(null), 500);
+      if (goalSlots[i] !== 'empty') continue;
+      if (
+        i === 3 &&
+        activeScreen !== 'FARM' &&
+        firstThreePlantGoalSlotsFilled(goalSlots)
+      ) {
+        pendingFourthPlantGoalSlotRef.current = true;
         break;
       }
+      setGoalSlots((s) => { const n = [...s]; n[i] = 'loading'; return n; });
+      setGoalDisplayOrder((prev) => (prev.includes(i) ? prev : [...prev, i]));
+      setGoalSlotFadeInSlot(i);
+      setGoalLoadingSeconds(getGoalLoadingSeconds(harvestState, goldenPotCount));
+      setTimeout(() => setGoalSlotFadeInSlot(null), 500);
+      break;
     }
-  }, [playerLevel, isLoading, goalSlots, harvestState, goldenPotCount]);
+  }, [isLoading, goalSlots, harvestState, goldenPotCount, activeScreen]);
+
+  // Finish deferred 4th-slot load once player is on the garden
+  useEffect(() => {
+    if (isLoading || activeScreen !== 'FARM') return;
+    if (!pendingFourthPlantGoalSlotRef.current) return;
+    const maxSlots = getMaxPlantGoalSlots(goldenPotCount);
+    if (maxSlots < 4 || goalSlots[3] !== 'empty') {
+      pendingFourthPlantGoalSlotRef.current = false;
+      return;
+    }
+    if (goalSlots.some((s) => s === 'loading')) return;
+    if (!firstThreePlantGoalSlotsFilled(goalSlots)) {
+      pendingFourthPlantGoalSlotRef.current = false;
+      return;
+    }
+    pendingFourthPlantGoalSlotRef.current = false;
+    setGoalSlots((s) => { const n = [...s]; n[3] = 'loading'; return n; });
+    setGoalDisplayOrder((prev) => (prev.includes(3) ? prev : [...prev, 3]));
+    setGoalSlotFadeInSlot(3);
+    setGoalLoadingSeconds(getGoalLoadingSeconds(harvestState, goldenPotCount));
+    setTimeout(() => setGoalSlotFadeInSlot(null), 500);
+  }, [activeScreen, isLoading, goalSlots, harvestState, goldenPotCount]);
 
   // Coin goal: show after 30–60s (random) since last hide; only from level 2; repeats forever
   useEffect(() => {
@@ -4569,21 +4645,45 @@ export default function App() {
     setActiveTab(save.activeTab);
     setRewardedOffers(save.rewardedOffers.filter((o) => !isStorePremiumOnlyOfferId(o.id)));
     setBarnNotification(save.barnNotification);
-    setGoalSlots(save.goalSlots);
-    setGoalPlantTypes(save.goalPlantTypes);
+    const goldenPotN = (save.plantMasteryUnlockedLevels ?? []).length;
+    goldenPotCountForTierPopupRef.current = goldenPotN;
+    if (goldenPotTierUnlockPopupTimeoutRef.current != null) {
+      window.clearTimeout(goldenPotTierUnlockPopupTimeoutRef.current);
+      goldenPotTierUnlockPopupTimeoutRef.current = null;
+    }
+    setGoldenPotBonusRevealTier(null);
+    const maxPlantSlotsHydrate = getMaxPlantGoalSlots(goldenPotN);
+    const slotsNorm = [...save.goalSlots] as GameSaveV1['goalSlots'];
+    const typesNorm = [...save.goalPlantTypes];
+    const countsNorm = [...save.goalCounts];
+    const amtNorm = [...save.goalAmountsRequired];
+    const completedNorm = [...save.goalCompletedValues];
+    let orderNorm = [...save.goalDisplayOrder];
+    if (maxPlantSlotsHydrate < 4 && slotsNorm[3] !== 'empty') {
+      slotsNorm[3] = 'empty';
+      typesNorm[3] = 0;
+      countsNorm[3] = 0;
+      amtNorm[3] = 0;
+      completedNorm[3] = 0;
+      orderNorm = orderNorm.filter((i) => i !== 3);
+    }
+    setGoalSlots(slotsNorm);
+    setGoalPlantTypes(typesNorm);
     setDiscoveryGoalLightGreenDismissed([false, false, false, false, false]);
     if (Array.isArray(save.goalDiscoveryLightGreenActive) && save.goalDiscoveryLightGreenActive.length === 5) {
-      setGoalDiscoveryLightGreenActive(save.goalDiscoveryLightGreenActive.map((x) => x === true));
+      const gdl = save.goalDiscoveryLightGreenActive.map((x) => x === true);
+      if (maxPlantSlotsHydrate < 4) gdl[3] = false;
+      setGoalDiscoveryLightGreenActive(gdl);
     } else {
       setGoalDiscoveryLightGreenActive(
-        deriveGoalDiscoveryLightGreenActive(save.goalSlots, save.goalPlantTypes, save.highestPlantEver)
+        deriveGoalDiscoveryLightGreenActive(slotsNorm, typesNorm, save.highestPlantEver)
       );
     }
     setGoalLoadingSeconds(save.goalLoadingSeconds);
-    setGoalCounts(save.goalCounts);
-    setGoalAmountsRequired(save.goalAmountsRequired);
-    setGoalCompletedValues(save.goalCompletedValues);
-    setGoalDisplayOrder(save.goalDisplayOrder);
+    setGoalCounts(countsNorm);
+    setGoalAmountsRequired(amtNorm);
+    setGoalCompletedValues(completedNorm);
+    setGoalDisplayOrder(orderNorm);
     setCoinGoalVisible(save.coinGoalVisible);
     setCoinGoalValue(save.coinGoalValue);
     setCoinGoalTimeRemaining(save.coinGoalTimeRemaining);
@@ -5205,7 +5305,7 @@ export default function App() {
                   style={{ top: -25, height: 110, paddingTop: 25 }}
                 >
                 {[0, 1, 2, 3, 4].map((slotIdx) => {
-                  const maxGoalSlots = getMaxGoalSlots(playerLevel);
+                  const maxGoalSlots = getMaxPlantGoalSlots(goldenPotCount);
                   const visibleOrder = goalDisplayOrder.filter((i) => goalSlots[i] !== 'empty' && i < maxGoalSlots);
                   const goalDisplayIndex = visibleOrder.indexOf(slotIdx);
                   const state = goalSlots[slotIdx];
@@ -5330,7 +5430,7 @@ export default function App() {
 
                       setTimeout(() => {
                         setGoalCompactionStagger(null);
-                        const maxSlots = getMaxGoalSlots(playerLevel);
+                        const maxSlots = getMaxPlantGoalSlots(goldenPotCount);
                         setGoalSlots((s) => {
                           if (ftue9NoNewGoalsRef.current) return s; // FTUE 9: no new goal loading; keep slot empty
                           const hasLoading = s.some((state) => state === 'loading');
@@ -5338,6 +5438,14 @@ export default function App() {
                           const n = [...s];
                           if (n[slotIdx] === 'empty' && slotIdx < maxSlots) {
                             if (slotIdx === 0 && ftue7SkipLoadingSlot0Ref.current) return s; // FTUE 7 spawns slot 0 & 1 at 1s/1.2s
+                            if (
+                              slotIdx === 3 &&
+                              activeScreenRef.current !== 'FARM' &&
+                              firstThreePlantGoalSlotsFilled(n)
+                            ) {
+                              pendingFourthPlantGoalSlotRef.current = true;
+                              return n;
+                            }
                             n[slotIdx] = 'loading';
                             setGoalDisplayOrder((prev) => (prev.includes(slotIdx) ? prev : [...prev, slotIdx]));
                             setGoalSlotFadeInSlot(slotIdx);
@@ -6157,7 +6265,10 @@ export default function App() {
                               onMouseDown={() => setPlantCollectionViewBonusesPressed(true)}
                               onMouseUp={() => setPlantCollectionViewBonusesPressed(false)}
                               onMouseLeave={() => setPlantCollectionViewBonusesPressed(false)}
-                              onClick={() => setGoldenPotBonusesPopupOpen(true)}
+                              onClick={() => {
+                                setGoldenPotBonusRevealTier(null);
+                                setGoldenPotBonusesPopupOpen(true);
+                              }}
                               className={`relative w-1/2 mx-auto flex items-center justify-center mt-2 h-8 transition-all border outline outline-1 rounded-[8px] shadow-[inset_0_1px_1px_rgba(255,255,255,0.4)] active:translate-y-[2px] active:border-b-0 active:mb-[4px]`}
                               style={{
                                 backgroundColor: plantCollectionViewBonusesPressed ? '#61882b' : '#cae060',
@@ -6721,7 +6832,7 @@ export default function App() {
                   window.setTimeout(() => setFtue11ThreePlantGoalWindowActive(false), 3200);
 
                   // Spawn 3 starter goals (plant 1/2/3) with 0.5s stagger and bounce.
-                  const maxSlots = getMaxGoalSlots(playerLevel);
+                  const maxSlots = getMaxPlantGoalSlots(goldenPotCount);
                   const cropYieldLevel = getCropYieldPerHarvest(cropsState);
                   const plantLevels = [1, 2, 3];
                   const emptySlots: number[] = [];
@@ -6911,8 +7022,10 @@ export default function App() {
                 goldenPotCount={plantMastery.unlockedLevels.length}
                 maxGoldenPots={24}
                 appScale={appScale}
+                revealTierPotCount={goldenPotBonusRevealTier}
                 onClose={() => {
                   lastOtherPopupClosedAtRef.current = Date.now();
+                  setGoldenPotBonusRevealTier(null);
                   setGoldenPotBonusesPopupOpen(false);
                   setCollectionFtuePhase((p) => (p === 'point_bonuses' ? 'point_garden_nav' : p));
                   queueMicrotask(() => {

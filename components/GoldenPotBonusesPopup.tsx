@@ -31,6 +31,20 @@ interface LeafParticle {
   lifetime: number;
 }
 
+interface RowBurstLeaf {
+  id: number;
+  sprite: string;
+  /** Offset from row center (px, inner coords). */
+  spawnX: number;
+  spawnY: number;
+  /** Outward unit normal for drift. */
+  nx: number;
+  ny: number;
+  dist: number;
+  rot: number;
+  size: number;
+}
+
 export interface GoldenPotBonusesPopupProps {
   isVisible: boolean;
   onClose: () => void;
@@ -38,12 +52,85 @@ export interface GoldenPotBonusesPopupProps {
   goldenPotCount: number;
   maxGoldenPots?: number;
   appScale?: number;
+  /**
+   * When opening right after unlocking this tier (e.g. 4), that row shows disabled until open settles,
+   * then after 0.25s it pops to green with a small leaf burst.
+   */
+  revealTierPotCount?: number | null;
 }
 
 const POPUP_LEAF_COUNT = 40;
 const POPUP_LEAF_MIN_LIFETIME_MS = 250;
 const POPUP_LEAF_MAX_LIFETIME_MS = 1000;
 const POPUP_CLOSE_MS = 200;
+
+/** Popup open burst leaf size (px). Tier row burst uses 50% of this range. */
+const POPUP_OPEN_LEAF_SIZE_MIN = 20;
+const POPUP_OPEN_LEAF_SIZE_RANGE = 20;
+const BONUS_ROW_LEAF_SIZE_MIN = POPUP_OPEN_LEAF_SIZE_MIN * 0.5;
+const BONUS_ROW_LEAF_SIZE_RANGE = POPUP_OPEN_LEAF_SIZE_RANGE * 0.5;
+
+/** Horizontal pill matching bonus row sprite (~520px inner tier width, flat top/bottom, rounded ends). */
+const BONUS_ROW_PILL_RX = 234;
+const BONUS_ROW_PILL_RY = 26;
+const BONUS_ROW_PILL_L = Math.max(0, BONUS_ROW_PILL_RX - BONUS_ROW_PILL_RY);
+const BONUS_ROW_LEAF_COUNT = 36;
+
+/** t01 in [0,1): point on stadium perimeter + unit outward normal (center at origin). */
+function stadiumPillPerimeterPoint(t01: number, L: number, Ry: number): { x: number; y: number; nx: number; ny: number } {
+  const topLen = 2 * L;
+  const arcLen = Math.PI * Ry;
+  const perim = 2 * topLen + 2 * arcLen;
+  let s = ((t01 % 1) + 1) % 1;
+  s *= perim;
+
+  if (s < topLen) {
+    const u = s / topLen;
+    const x = -L + u * (2 * L);
+    const y = -Ry;
+    return { x, y, nx: 0, ny: -1 };
+  }
+  s -= topLen;
+  if (s < arcLen) {
+    const u = s / arcLen;
+    const theta = -Math.PI / 2 + u * Math.PI;
+    const nx = Math.cos(theta);
+    const ny = Math.sin(theta);
+    return { x: L + Ry * nx, y: Ry * ny, nx, ny };
+  }
+  s -= arcLen;
+  if (s < topLen) {
+    const u = s / topLen;
+    const x = L - u * (2 * L);
+    const y = Ry;
+    return { x, y, nx: 0, ny: 1 };
+  }
+  s -= topLen;
+  const u = s / arcLen;
+  const theta = Math.PI / 2 + u * Math.PI;
+  const nx = Math.cos(theta);
+  const ny = Math.sin(theta);
+  return { x: -L + Ry * nx, y: Ry * ny, nx, ny };
+}
+
+function createBonusRowPillLeaves(idBase: number): RowBurstLeaf[] {
+  return Array.from({ length: BONUS_ROW_LEAF_COUNT }, (_, i) => {
+    const t = (i + Math.random() * 0.85) / BONUS_ROW_LEAF_COUNT;
+    const { x, y, nx, ny } = stadiumPillPerimeterPoint(t, BONUS_ROW_PILL_L, BONUS_ROW_PILL_RY);
+    const jitter = (Math.random() - 0.5) * 3;
+    return {
+      id: idBase + i,
+      sprite: LEAF_SPRITES[i % LEAF_SPRITES.length],
+      spawnX: x + nx * jitter,
+      spawnY: y + ny * jitter,
+      nx,
+      ny,
+      dist: 28 + Math.random() * 44,
+      rot: Math.random() * 360,
+      size: BONUS_ROW_LEAF_SIZE_MIN + Math.random() * BONUS_ROW_LEAF_SIZE_RANGE,
+    };
+  });
+}
 
 const POPUP_WIDTH = 260;
 const POPUP_HEIGHT = 320;
@@ -82,7 +169,7 @@ function createPopupLeaves(): LeafParticle[] {
       speed: Math.random() * 600,
       rotationSpeed: (Math.random() - 0.5) * 540,
       initialRotation: Math.random() * 360,
-      size: 20 + Math.random() * 20,
+      size: POPUP_OPEN_LEAF_SIZE_MIN + Math.random() * POPUP_OPEN_LEAF_SIZE_RANGE,
       lifetime: POPUP_LEAF_MIN_LIFETIME_MS + Math.random() * (POPUP_LEAF_MAX_LIFETIME_MS - POPUP_LEAF_MIN_LIFETIME_MS),
       delay: 0,
       spawnX,
@@ -96,13 +183,14 @@ const SUBTITLE_COLOR = '#5c4a32';
 /** Left column tier number (scaled inner coords). */
 const BONUS_TIER_NUMBER_REM = 1.25;
 
+/** Display order: 4 golden pots at top → 24 at bottom (matches `constants/goldenPotBonuses` thresholds). */
 const GOLD_POT_BONUS_TIERS: readonly { potCount: number; description: string }[] = [
-  { potCount: 4, description: '2x Offline Earnings' },
-  { potCount: 8, description: 'Instant Orders' },
-  { potCount: 12, description: '150% Production Speed' },
-  { potCount: 16, description: '150% Harvest Speed' },
-  { potCount: 20, description: '2x Merge Coins' },
-  { potCount: 24, description: 'Auto Merge Enabled' },
+  { potCount: 4, description: '4th Order Slot' },
+  { potCount: 8, description: '2x Offline Earnings' },
+  { potCount: 12, description: '2x Merge Coins' },
+  { potCount: 16, description: '150% Production' },
+  { potCount: 20, description: '150% Harvest' },
+  { potCount: 24, description: 'Auto Merge' },
 ];
 
 const BONUS_DISABLED_NUMBER_COLOR = '#dcc999';
@@ -110,15 +198,20 @@ const BONUS_DISABLED_DESC_COLOR = '#c7b381';
 const BONUS_ENABLED_NUMBER_COLOR = '#9fb744';
 const BONUS_ENABLED_DESC_COLOR = '#62873b';
 
+const BONUS_ROW_REVEAL_DELAY_MS = 250;
+
 export const GoldenPotBonusesPopup: React.FC<GoldenPotBonusesPopupProps> = ({
   isVisible,
   onClose,
   goldenPotCount,
   maxGoldenPots = 24,
   appScale = 1,
+  revealTierPotCount = null,
 }) => {
   const [animState, setAnimState] = useState<PopupAnimWithPreflight>('hidden');
   const [assetsReady, setAssetsReady] = useState(false);
+  const [tierRevealArmed, setTierRevealArmed] = useState(false);
+  const [rowBurstLeaves, setRowBurstLeaves] = useState<RowBurstLeaf[]>([]);
   const [leaves, setLeaves] = useState<LeafParticle[]>([]);
   const [leafPositions, setLeafPositions] = useState<
     { x: number; y: number; opacity: number; rotation: number; scale: number }[]
@@ -220,6 +313,29 @@ export const GoldenPotBonusesPopup: React.FC<GoldenPotBonusesPopupProps> = ({
   }, []);
 
   usePopupPreflightEnter(animState, beginEnterAfterPreflight);
+
+  useEffect(() => {
+    setTierRevealArmed(false);
+    setRowBurstLeaves([]);
+  }, [revealTierPotCount, isVisible]);
+
+  useEffect(() => {
+    if (!revealTierPotCount || animState !== 'visible') return;
+    const t = window.setTimeout(() => setTierRevealArmed(true), BONUS_ROW_REVEAL_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [revealTierPotCount, animState]);
+
+  useEffect(() => {
+    if (!tierRevealArmed || !revealTierPotCount) {
+      setRowBurstLeaves([]);
+      return;
+    }
+    const idBase = Date.now();
+    const burst = createBonusRowPillLeaves(idBase);
+    setRowBurstLeaves(burst);
+    const clearT = setTimeout(() => setRowBurstLeaves([]), 720);
+    return () => clearTimeout(clearT);
+  }, [tierRevealArmed, revealTierPotCount]);
 
   useEffect(() => {
     if (isVisible && assetsReady && animState === 'hidden') {
@@ -347,6 +463,22 @@ export const GoldenPotBonusesPopup: React.FC<GoldenPotBonusesPopupProps> = ({
               0% { transform: scale(1); opacity: 1; }
               100% { transform: scale(0.9); opacity: 0; }
             }
+            @keyframes bonusTierRevealPop {
+              0% { transform: scale(1); }
+              35% { transform: scale(1.07); }
+              100% { transform: scale(1); }
+            }
+            @keyframes bonusRowLeafAlongNormal {
+              0% {
+                opacity: 1;
+                transform: translate(-50%, -50%) translate(0, 0) rotate(var(--leaf-rot, 0deg)) scale(1);
+              }
+              100% {
+                opacity: 0;
+                transform: translate(-50%, -50%) translate(var(--dx, 0px), var(--dy, 0px))
+                  rotate(calc(var(--leaf-rot, 0deg) + 100deg)) scale(0.48);
+              }
+            }
           `}</style>
 
           <div
@@ -469,14 +601,55 @@ export const GoldenPotBonusesPopup: React.FC<GoldenPotBonusesPopupProps> = ({
                   style={{ marginTop: '28px', maxWidth: '520px', gap: '10px' }}
                 >
                   {GOLD_POT_BONUS_TIERS.map((tier) => {
-                    const enabled = clampedCount >= tier.potCount;
-                    const bonusSprite = enabled
+                    const unlockedByCount = clampedCount >= tier.potCount;
+                    const isStagedRevealRow =
+                      revealTierPotCount != null &&
+                      revealTierPotCount === tier.potCount &&
+                      unlockedByCount;
+                    const showAsUnlocked = unlockedByCount && (!isStagedRevealRow || tierRevealArmed);
+                    const bonusSprite = showAsUnlocked
                       ? assetPath('/assets/popups/popup_bonuses_enabled.png')
                       : assetPath('/assets/popups/popup_bonuses_disabled.png');
-                    const numberColor = enabled ? BONUS_ENABLED_NUMBER_COLOR : BONUS_DISABLED_NUMBER_COLOR;
-                    const descColor = enabled ? BONUS_ENABLED_DESC_COLOR : BONUS_DISABLED_DESC_COLOR;
+                    const numberColor = showAsUnlocked ? BONUS_ENABLED_NUMBER_COLOR : BONUS_DISABLED_NUMBER_COLOR;
+                    const descColor = showAsUnlocked ? BONUS_ENABLED_DESC_COLOR : BONUS_DISABLED_DESC_COLOR;
+                    const playRowPop = isStagedRevealRow && tierRevealArmed;
                     return (
-                      <div key={tier.potCount} className="relative w-full shrink-0">
+                      <div
+                        key={tier.potCount}
+                        className="relative w-full shrink-0 overflow-visible"
+                        style={
+                          playRowPop
+                            ? { animation: 'bonusTierRevealPop 420ms ease-out' }
+                            : undefined
+                        }
+                      >
+                        {tier.potCount === revealTierPotCount && rowBurstLeaves.length > 0 && (
+                          <div
+                            className="pointer-events-none absolute inset-0 z-10 overflow-visible"
+                            aria-hidden
+                          >
+                            {rowBurstLeaves.map((leaf) => (
+                              <div
+                                key={leaf.id}
+                                className="pointer-events-none absolute"
+                                style={{
+                                  left: `calc(50% + ${leaf.spawnX}px)`,
+                                  top: `calc(50% + ${leaf.spawnY}px)`,
+                                  width: leaf.size,
+                                  height: leaf.size,
+                                  ['--leaf-rot' as string]: `${leaf.rot}deg`,
+                                  ['--dx' as string]: `${leaf.nx * leaf.dist}px`,
+                                  ['--dy' as string]: `${leaf.ny * leaf.dist}px`,
+                                  animation: 'bonusRowLeafAlongNormal 0.7s ease-out forwards',
+                                  animationDelay: `${(leaf.id % 8) * 5}ms`,
+                                  filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.35))',
+                                }}
+                              >
+                                <img src={leaf.sprite} alt="" className="h-full w-full object-contain" draggable={false} />
+                              </div>
+                            ))}
+                          </div>
+                        )}
                         <img
                           src={bonusSprite}
                           alt=""

@@ -1,20 +1,37 @@
 /**
  * Golden pot count = `plantMastery.unlockedLevels.length` (tiers 1–24).
- * Thresholds match `GOLD_POT_BONUS_TIERS` in GoldenPotBonusesPopup.
+ * Thresholds match `GOLD_POT_BONUS_TIERS` in GoldenPotBonusesPopup (4 at top → 24 at bottom).
  */
-export const GOLDEN_POT_BONUS_OFFLINE_2X_AT = 4;
-export const GOLDEN_POT_BONUS_INSTANT_ORDERS_AT = 8;
-export const GOLDEN_POT_BONUS_PRODUCTION_150_AT = 12;
-export const GOLDEN_POT_BONUS_HARVEST_150_AT = 16;
-export const GOLDEN_POT_BONUS_MERGE_COINS_2X_AT = 20;
+export const GOLDEN_POT_BONUS_FOURTH_ORDER_SLOT_AT = 4;
+export const GOLDEN_POT_BONUS_OFFLINE_2X_AT = 8;
+export const GOLDEN_POT_BONUS_MERGE_COINS_2X_AT = 12;
+export const GOLDEN_POT_BONUS_PRODUCTION_150_AT = 16;
+export const GOLDEN_POT_BONUS_HARVEST_150_AT = 20;
 export const GOLDEN_POT_BONUS_AUTO_MERGE_AT = 24;
+
+/** Thresholds in display order (top → bottom of bonuses popup). */
+export const GOLDEN_POT_BONUS_TIER_THRESHOLDS = [4, 8, 12, 16, 20, 24] as const;
+
+/** If `newCount` just crossed a bonus tier (was strictly below, now at or above), return that tier's pot count; else null. */
+export function getGoldenPotBonusTierJustUnlocked(prevCount: number, newCount: number): number | null {
+  if (newCount <= prevCount) return null;
+  for (const t of GOLDEN_POT_BONUS_TIER_THRESHOLDS) {
+    if (prevCount < t && newCount >= t) return t;
+  }
+  return null;
+}
+
+export function hasGoldenPotFourthOrderSlot(count: number): boolean {
+  return count >= GOLDEN_POT_BONUS_FOURTH_ORDER_SLOT_AT;
+}
+
+/** Plant goal slots (indices 0–3): 3 until enough golden pots; 4 after tier unlock. Coin goal stays separate (5th UI slot). */
+export function getMaxPlantGoalSlots(goldenPotCount: number): number {
+  return hasGoldenPotFourthOrderSlot(goldenPotCount) ? 4 : 3;
+}
 
 export function hasGoldenPotOfflineEarningsDouble(count: number): boolean {
   return count >= GOLDEN_POT_BONUS_OFFLINE_2X_AT;
-}
-
-export function hasGoldenPotInstantOrders(count: number): boolean {
-  return count >= GOLDEN_POT_BONUS_INSTANT_ORDERS_AT;
 }
 
 export function hasGoldenPotProduction150(count: number): boolean {
@@ -84,4 +101,3 @@ export function getHarvestRechargePerMinute(
   const pct = getHarvestSpeedDisplayPercent(harvestSpeedLevel, goldenPotCount);
   return getRechargePerMinuteForDisplayPercent(pct);
 }
-

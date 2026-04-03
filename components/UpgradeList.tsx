@@ -9,11 +9,7 @@ import {
   WILD_GROWTH_UNLOCK_PLAYER_LEVEL,
 } from '../utils/wildGrowth';
 import { PlantWithPot } from './PlantWithPot';
-import {
-  hasGoldenPotHarvest150,
-  hasGoldenPotInstantOrders,
-  hasGoldenPotProduction150,
-} from '../constants/goldenPotBonuses';
+import { hasGoldenPotHarvest150, hasGoldenPotProduction150 } from '../constants/goldenPotBonuses';
 
 export interface UpgradeState {
   level: number;
@@ -244,22 +240,22 @@ const SEEDS_UNLOCK_LEVELS: Record<string, number> = {
   seed_production: 1,
   seed_storage: 2, // Storage Capacity: unlocks at level 2
   double_seeds: 4,
-  bonus_seeds: 9,
+  bonus_seeds: 8,
 };
 
 const CROPS_UNLOCK_LEVELS: Record<string, number> = {
   harvest_speed: 1,
   plot_expansion: 2,
   wild_growth: WILD_GROWTH_UNLOCK_PLAYER_LEVEL,
-  crop_value: 10,
-  merge_harvest: 11,
+  crop_value: 9,
+  merge_harvest: 10,
 };
 
 const HARVEST_UNLOCK_LEVELS: Record<string, number> = {
   customer_speed: 1,
   market_value: 3,
   seed_surplus: 7,
-  happy_customer: 11,
+  happy_customer: 10,
 };
 
 /** Pricing tier: controls per-purchase scaling multiplier. */
@@ -362,7 +358,7 @@ export function calculateUpgradeCost(upgradeId: string, currentLevel: number): n
 }
 
 /** Highest player level that shows a scripted unlock popup (Plant Collection at 5 … Happy Customers at 11). */
-export const MAX_LEVEL_WITH_CUSTOM_UNLOCK_POPUP = 11;
+export const MAX_LEVEL_WITH_CUSTOM_UNLOCK_POPUP = 10;
 
 export type LevelUnlockInfo = {
   title: string;
@@ -410,10 +406,9 @@ export const getLevelUnlockInfo = (level: number): LevelUnlockInfo => {
     },
     { level: 6, upgradeId: 'wild_growth', tab: 'CROPS', name: 'Wild Growth', description: 'Plants automatically duplicate over time', icon: 'icon_luckymerge.png', popupDescription: 'Plants in your garden will now automatically duplicate over time' },
     { level: 7, upgradeId: 'seed_surplus', tab: 'HARVEST', name: 'Surplus Recharges', description: 'Increase coins gained from extra seed and harvest recharges', icon: 'icon_seedsurplus.png', popupDescription: 'Increase coins gained from extra seed and harvest recharges' },
-    { level: 8, upgradeId: '', tab: 'HARVEST', name: 'Extra Orders', description: 'You can now recieve up to 4 orders at a time', icon: 'icon_extracustomer.png', popupDescription: 'You can now recieve up to 4 orders at a time' },
-    { level: 9, upgradeId: 'bonus_seeds', tab: 'SEEDS', name: 'Lucky Seed', description: 'Increase chance to produce a bonus higher level seed', icon: 'icon_luckyseed.png', popupDescription: 'Seeds now have a chance to produce an extra higher level plant' },
-    { level: 10, upgradeId: 'crop_value', tab: 'CROPS', name: 'Crop Yield', description: 'Increase how many crops your plants produce when harvesting', icon: 'icon_cropvalue.png', popupDescription: 'You can now increase how many crops your plants produce when harvesting' },
-    { level: 11, upgradeId: 'happy_customer', tab: 'HARVEST', name: 'Happy Customers', description: 'Increase chance that customers pay double for orders', icon: 'icon_happycustomer.png', popupDescription: 'You can now increase the chance for customers to pay double coins for orders' },
+    { level: 8, upgradeId: 'bonus_seeds', tab: 'SEEDS', name: 'Lucky Seed', description: 'Increase chance to produce a bonus higher level seed', icon: 'icon_luckyseed.png', popupDescription: 'Seeds now have a chance to produce an extra higher level plant' },
+    { level: 9, upgradeId: 'crop_value', tab: 'CROPS', name: 'Crop Yield', description: 'Increase how many crops your plants produce when harvesting', icon: 'icon_cropvalue.png', popupDescription: 'You can now increase how many crops your plants produce when harvesting' },
+    { level: 10, upgradeId: 'happy_customer', tab: 'HARVEST', name: 'Happy Customers', description: 'Increase chance that customers pay double for orders', icon: 'icon_happycustomer.png', popupDescription: 'You can now increase the chance for customers to pay double coins for orders' },
   ];
   const match = allUnlocks.find((u) => u.level === level);
   if (match) {
@@ -531,15 +526,13 @@ export const isCropYieldMaxed = (cropsState: Record<string, UpgradeState>): bool
   return level >= 9; // 1 + 9 = 10 max
 };
 
-/** Order Speed: goal loading time in seconds (10 base - 1 per level, min 0). Golden pot tier 8+ → 0s. */
-export const getGoalLoadingSeconds = (harvestState: HarvestState, goldenPotCount = 0): number => {
-  if (hasGoldenPotInstantOrders(goldenPotCount)) return 0;
+/** Order Speed: goal loading time in seconds (10 base - 1 per level, min 0). */
+export const getGoalLoadingSeconds = (harvestState: HarvestState, _goldenPotCount = 0): number => {
   const level = harvestState?.customer_speed?.level ?? 0;
   return Math.max(0, 10 - 1 * level);
 };
 
-export const isCustomerSpeedMaxed = (harvestState: Record<string, UpgradeState>, goldenPotCount = 0): boolean => {
-  if (hasGoldenPotInstantOrders(goldenPotCount)) return true;
+export const isCustomerSpeedMaxed = (harvestState: Record<string, UpgradeState>, _goldenPotCount = 0): boolean => {
   const level = harvestState?.customer_speed?.level ?? 0;
   return level >= 10; // 10 - 1*10 = 0s
 };
@@ -1196,7 +1189,6 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
         let displayValue = seedsValue ?? cropsValue ?? harvestValue;
         if (upgrade.id === 'seed_production' && hasGoldenPotProduction150(goldenPotCount)) displayValue = '150%';
         if (upgrade.id === 'harvest_speed' && hasGoldenPotHarvest150(goldenPotCount)) displayValue = '150%';
-        if (upgrade.id === 'customer_speed' && hasGoldenPotInstantOrders(goldenPotCount)) displayValue = '0s';
         
         const UNLOCK_FLASH_BLUE = '#89c8e1';
         return (
