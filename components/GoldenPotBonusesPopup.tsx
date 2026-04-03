@@ -222,6 +222,7 @@ export const GoldenPotBonusesPopup: React.FC<GoldenPotBonusesPopupProps> = ({
   const leafPosRef = useRef<
     { x: number; y: number; vx: number; vy: number; opacity: number; rotation: number; scale: number; started: boolean }[]
   >([]);
+  const popupCardLayoutRef = useRef<HTMLDivElement>(null);
 
   const clampedCount = Math.max(0, Math.min(maxGoldenPots, goldenPotCount));
   const countLabel = `${clampedCount}/${maxGoldenPots}`;
@@ -312,7 +313,7 @@ export const GoldenPotBonusesPopup: React.FC<GoldenPotBonusesPopupProps> = ({
     setTimeout(() => setAnimState('visible'), 250);
   }, []);
 
-  usePopupPreflightEnter(animState, beginEnterAfterPreflight);
+  usePopupPreflightEnter(animState, beginEnterAfterPreflight, popupCardLayoutRef);
 
   useEffect(() => {
     setTierRevealArmed(false);
@@ -440,6 +441,7 @@ export const GoldenPotBonusesPopup: React.FC<GoldenPotBonusesPopupProps> = ({
         )}
 
         <div
+          ref={popupCardLayoutRef}
           className="relative flex flex-col items-center"
           style={{
             width: '320px',

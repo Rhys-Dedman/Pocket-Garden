@@ -1,7 +1,7 @@
 /**
  * Settings (Pause) Popup - Debugger menu. Title/divider/description match discovery popup style.
  */
-import React, { useState, useEffect, useCallback, type CSSProperties } from 'react';
+import React, { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react';
 import { assetPath } from '../utils/assetPath';
 import { popupCardSurfaceStyle, usePopupPreflightEnter, type PopupAnimWithPreflight } from '../hooks/usePopupPreflightEnter';
 
@@ -109,13 +109,14 @@ export const PauseMenuPopup: React.FC<PauseMenuPopupProps> = ({
   const [addCoinsPressed, setAddCoinsPressed] = useState(false);
   const [clearProgressPressed, setClearProgressPressed] = useState(false);
   const [clearShedPressed, setClearShedPressed] = useState(false);
+  const popupCardLayoutRef = useRef<HTMLDivElement>(null);
 
   const beginEnterAfterPreflight = useCallback(() => {
     setAnimState('entering');
     setTimeout(() => setAnimState('visible'), 250);
   }, []);
 
-  usePopupPreflightEnter(animState, beginEnterAfterPreflight);
+  usePopupPreflightEnter(animState, beginEnterAfterPreflight, popupCardLayoutRef);
 
   useEffect(() => {
     if (isVisible && animState === 'hidden') {
@@ -180,6 +181,7 @@ export const PauseMenuPopup: React.FC<PauseMenuPopupProps> = ({
         }}
       >
         <div
+          ref={popupCardLayoutRef}
           className="relative flex flex-col items-center"
           style={{
             width: '260px',

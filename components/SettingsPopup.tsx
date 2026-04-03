@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { assetPath } from '../utils/assetPath';
 import { popupCardSurfaceStyle, usePopupPreflightEnter, type PopupAnimWithPreflight } from '../hooks/usePopupPreflightEnter';
 import { getPerformanceMode, setPerformanceMode } from '../utils/performanceMode';
@@ -82,6 +82,7 @@ export const SettingsPopup: React.FC<SettingsPopupProps> = ({
   const [devToolsPressed, setDevToolsPressed] = useState(false);
   const [clearBoostsPressed, setClearBoostsPressed] = useState(false);
   const [resetPressed, setResetPressed] = useState(false);
+  const popupCardLayoutRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isVisible) {
@@ -95,7 +96,7 @@ export const SettingsPopup: React.FC<SettingsPopupProps> = ({
     setTimeout(() => setAnimState('visible'), 250);
   }, []);
 
-  usePopupPreflightEnter(animState, beginEnterAfterPreflight);
+  usePopupPreflightEnter(animState, beginEnterAfterPreflight, popupCardLayoutRef);
 
   useEffect(() => {
     if (isVisible && animState === 'hidden') {
@@ -132,6 +133,7 @@ export const SettingsPopup: React.FC<SettingsPopupProps> = ({
       />
       <div className="relative flex items-center justify-center" style={{ transform: `scale(${appScale})`, transformOrigin: 'center center' }}>
         <div
+          ref={popupCardLayoutRef}
           className="relative flex flex-col items-center"
           style={{
             width: '260px',

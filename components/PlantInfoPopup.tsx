@@ -117,6 +117,7 @@ export const PlantInfoPopup: React.FC<PlantInfoPopupProps> = ({
   const leafRafRef = useRef<number>(0);
   const leafStartTimeRef = useRef<number>(0);
   const leafPosRef = useRef<{ x: number; y: number; vx: number; vy: number; opacity: number; rotation: number; scale: number; started: boolean }[]>([]);
+  const popupCardLayoutRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!isVisible) {
@@ -205,7 +206,7 @@ export const PlantInfoPopup: React.FC<PlantInfoPopupProps> = ({
     setTimeout(() => setAnimState('visible'), 250);
   }, []);
 
-  usePopupPreflightEnter(animState, beginEnterAfterPreflight);
+  usePopupPreflightEnter(animState, beginEnterAfterPreflight, popupCardLayoutRef);
 
   useEffect(() => {
     if (isVisible && assetsReady && animState === 'hidden') {
@@ -315,6 +316,7 @@ export const PlantInfoPopup: React.FC<PlantInfoPopupProps> = ({
 
       {/* Popup Container - centered on screen with fixed dimensions */}
       <div 
+        ref={popupCardLayoutRef}
         className="relative flex flex-col items-center"
         style={{ 
           width: '320px',
