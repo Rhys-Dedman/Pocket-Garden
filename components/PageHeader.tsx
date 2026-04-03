@@ -372,12 +372,12 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
                     ...(hidePlayerLevel && { pointerEvents: 'none' as const }),
                   }}
                 >
-                  <span className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center justify-center leading-none -ml-3 pointer-events-none z-10 w-[30px] h-[30px]">
-                    <img src={assetPath('/assets/icons/icon_level.png')} alt="" className="w-[30px] h-[30px] object-contain object-left" />
-                    <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center font-black leading-none" style={{ color: '#c8e9eb', fontSize: 12, WebkitTextStroke: '1px rgba(0,0,0,0.5)', paintOrder: 'stroke fill' }}>{playerLevel}</span>
+                  <span className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center justify-center leading-none -ml-3 pointer-events-none z-10 w-10 h-10">
+                    <img src={assetPath('/assets/icons/icon_level.png')} alt="" className="w-10 h-10 object-contain object-left" />
+                    <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center font-black leading-none" style={{ color: '#c8e9eb', fontSize: 13, WebkitTextStroke: '1px rgba(0,0,0,0.5)', paintOrder: 'stroke fill' }}>{playerLevel}</span>
                   </span>
                   {/* Progress bar: 1px padding top/right/bottom, 4px left; track #775041; fill has 1px inner stroke */}
-                  <div className="flex-1 h-full flex items-stretch relative" style={{ paddingTop: 1, paddingRight: 1, paddingBottom: 1, paddingLeft: 10 }}>
+                  <div className="flex-1 h-full flex items-stretch relative" style={{ paddingTop: 1, paddingRight: 1, paddingBottom: 1, paddingLeft: 12 }}>
                     {/* Goals count: fixed center of bar, above progress fill; cream text, black stroke 50%; same size as coin panel (text-xs) */}
                     <span
                       className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none font-black text-xs leading-none z-10"

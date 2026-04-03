@@ -74,8 +74,8 @@ export interface GameSaveV1 {
   /** Plant levels (1–24) where mastery has been purchased. */
   plantMasteryUnlockedLevels: number[];
   /**
-   * After first "View Collection" from level 5: bar shows 50/50 for plant 1 and tier 1 is mastered.
-   * Next collected goal clears this and moves to plant 2 at 1/50.
+   * After first Collection visit from level 5: bar shows fake 15/15 (display L4) until intro clears, then normal level 5 tally.
+   * Next collected goal clears this; bar then mirrors player level progress; golden-pot queue advances on player level-up.
    */
   plantMasteryIntroBarComplete?: boolean;
   /** After collection FTUE fully finished (tapped Garden at end). */

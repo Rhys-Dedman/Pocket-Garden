@@ -113,6 +113,9 @@ const getMaxGoalSlots = (playerLevel: number): number =>
 
 /** Plant Collection barn UI (shelves, mastery bar, bonuses button) — navigation stays open; data keeps updating while locked. */
 const PLANT_COLLECTION_UI_UNLOCK_LEVEL = 5;
+/** Collection FTUE: fake full bar (15/15) until intro clears; icon shows this level instead of real player level. */
+const PLANT_COLLECTION_FTUE_INTRO_BAR_TOTAL = 15;
+const PLANT_COLLECTION_FTUE_INTRO_DISPLAY_PLAYER_LEVEL = 4;
 /** Collection FTUE: after “View Collection”, defer hole + finger until barn slide finishes. */
 const COLLECTION_FTUE_INTRO_CTA_OVERLAY_DELAY_MS = 600;
 
@@ -520,7 +523,7 @@ type PlantMasterySlice = {
   targetLevel: number;
   unlockPending: number[];
   unlockedLevels: number[];
-  /** First barn visit from L5: fake 50/50 + plant 1 mastered until next goal. */
+  /** First barn visit from L5: fake 4 + 15/15 bar, then real L5 + 0/20 after intro clears. */
   plantMasteryIntroBarComplete: boolean;
 };
 
@@ -956,7 +959,7 @@ export default function App() {
   } | null>(null);
   /** After “View Collection” → barn, wait for the screen slide to finish before measuring the golden-pot CTA + finger. */
   const [collectionFtueIntroCtaOverlayReady, setCollectionFtueIntroCtaOverlayReady] = useState(false);
-  /** Collection FTUE: fast “50/50 → 0/50” slide when first pot turns gold. */
+  /** Collection FTUE: fast bar reset when first pot turns gold (intro → player-level sync). */
   const [collectionFtueMasteryBarFastReset, setCollectionFtueMasteryBarFastReset] = useState(false);
   const goldenPotBonusesWasOpenRef = useRef(false);
   /** Paid store purchase confirmation (IAP stub); Collect fires boost particles + activation. */
@@ -1260,35 +1263,47 @@ export default function App() {
           ...m,
           plantMasteryIntroBarComplete: false,
           targetLevel: 2,
-          ordersProgress: 1,
+          ordersProgress: 0,
         };
       }
       if (m.targetLevel === 24 && m.ordersProgress >= seg) {
         return m;
       }
-      const nextP = m.ordersProgress + 1;
-      if (nextP < seg) {
-        return { ...m, ordersProgress: nextP };
-      }
+      return m;
+    });
+  }, []);
+
+  /** After Collection FTUE intro: advancing player level by 1 queues the next golden-pot tier (replaces 50-order segments). */
+  const plantMasteryLevelSyncInitRef = useRef(false);
+  const prevPlayerLevelForMasteryRef = useRef(playerLevel);
+  useEffect(() => {
+    if (!plantMasteryLevelSyncInitRef.current) {
+      plantMasteryLevelSyncInitRef.current = true;
+      prevPlayerLevelForMasteryRef.current = playerLevel;
+      return;
+    }
+    const prev = prevPlayerLevelForMasteryRef.current;
+    if (playerLevel !== prev + 1) {
+      prevPlayerLevelForMasteryRef.current = playerLevel;
+      return;
+    }
+    prevPlayerLevelForMasteryRef.current = playerLevel;
+    if (playerLevel < PLANT_COLLECTION_UI_UNLOCK_LEVEL) return;
+    setPlantMastery((m) => {
+      if (m.plantMasteryIntroBarComplete) return m;
+      if (m.targetLevel >= 24) return m;
       const pending = m.unlockPending.includes(m.targetLevel)
         ? m.unlockPending
         : [...m.unlockPending, m.targetLevel].sort((a, b) => a - b);
-      if (m.targetLevel < 24) {
-        return {
-          ordersProgress: 0,
-          targetLevel: m.targetLevel + 1,
-          unlockPending: pending,
-          unlockedLevels: m.unlockedLevels,
-        };
-      }
       return {
-        ordersProgress: seg,
-        targetLevel: 24,
+        ...m,
+        ordersProgress: 0,
+        targetLevel: m.targetLevel + 1,
         unlockPending: pending,
         unlockedLevels: m.unlockedLevels,
       };
     });
-  }, []);
+  }, [playerLevel]);
 
   // Testing cheat: instantly complete the current mastery segment.
   const completeMasterySegmentCheat = useCallback(() => {
@@ -2048,12 +2063,23 @@ export default function App() {
     ? 1 
     : Math.min(1, (viewportWidth - barnPadding) / barnDesignWidth);
 
-  const masterySeg = PLANT_MASTERY_ORDERS_PER_SEGMENT;
-  const masteryBarNumerator =
-    plantMastery.targetLevel === 24 && plantMastery.ordersProgress >= masterySeg
-      ? masterySeg
-      : plantMastery.ordersProgress;
-  const masteryBarFillPct = (masteryBarNumerator / masterySeg) * 100;
+  /** Barn Plant Collection bar: FTUE intro = fake full bar; then mirrors player level progress (same as header). */
+  const collectionBarGoalsRequired = getGoalsRequiredForLevel(playerLevel);
+  const collectionBarIntroActive = plantMastery.plantMasteryIntroBarComplete;
+  const collectionBarDisplayPlayerLevel = collectionBarIntroActive
+    ? PLANT_COLLECTION_FTUE_INTRO_DISPLAY_PLAYER_LEVEL
+    : playerLevel;
+  const collectionBarNumerator = collectionBarIntroActive
+    ? PLANT_COLLECTION_FTUE_INTRO_BAR_TOTAL
+    : playerLevelProgress;
+  const collectionBarDenominator = collectionBarIntroActive
+    ? PLANT_COLLECTION_FTUE_INTRO_BAR_TOTAL
+    : collectionBarGoalsRequired;
+  const collectionBarFillPct = collectionBarIntroActive
+    ? 100
+    : collectionBarGoalsRequired > 0
+      ? (playerLevelProgress / collectionBarGoalsRequired) * 100
+      : 0;
   const isPlantCollectionUiUnlocked = playerLevel >= PLANT_COLLECTION_UI_UNLOCK_LEVEL;
   const collectionFtueActive = collectionFtuePhase != null && !collectionFtueCompleted;
   const hideBonusesForCollectionFtue =
@@ -5755,18 +5781,36 @@ export default function App() {
                                 marginBottom: 8,
                               }}
                             >
-                              <span className="block">Complete orders to unlock golden pots.</span>
+                              <span className="block">Level Ups now unlock golden Pots.</span>
                               <span className="block">Earn bonuses as you collect them.</span>
                             </p>
-                            {/* Plant mastery: outer bar flat L/R; green fill has curved right “head” */}
-                            <div className="flex items-center justify-center gap-0 w-full" style={{ marginTop: 0, marginLeft: -2 }}>
-                              <img
-                                src={assetPath('/assets/icons/icon_plantmastery.png')}
-                                alt=""
-                                className="w-[36px] h-[36px] object-contain shrink-0 relative z-20"
-                                style={{ marginLeft: 8, marginRight: -8 }}
-                                draggable={false}
-                              />
+                            {/* Plant collection progress: same blues as player level bar; left icon matches header level. */}
+                            <div
+                              className="flex items-center justify-center gap-0 w-full"
+                              style={{ marginTop: 0, transform: 'translateX(2px)' }}
+                            >
+                              <span
+                                className="flex items-center justify-center leading-none shrink-0 relative z-20 w-10 h-10"
+                                style={{ marginLeft: 7, marginRight: -9, transform: 'translate(1px, -1px)' }}
+                              >
+                                <img
+                                  src={assetPath('/assets/icons/icon_level.png')}
+                                  alt=""
+                                  className="w-10 h-10 object-contain"
+                                  draggable={false}
+                                />
+                                <span
+                                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center font-black leading-none pointer-events-none"
+                                  style={{
+                                    color: '#c8e9eb',
+                                    fontSize: 13,
+                                    WebkitTextStroke: '1px rgba(0,0,0,0.5)',
+                                    paintOrder: 'stroke fill',
+                                  }}
+                                >
+                                  {collectionBarDisplayPlayerLevel}
+                                </span>
+                              </span>
                               <div
                                 className="relative inline-flex items-center border overflow-hidden"
                                 style={{
@@ -5786,13 +5830,13 @@ export default function App() {
                                       paintOrder: 'stroke fill',
                                     }}
                                   >
-                                    {masteryBarNumerator}/{masterySeg}
+                                    {collectionBarNumerator}/{collectionBarDenominator}
                                   </span>
                                   <div className="w-full h-full overflow-hidden bg-[#775041]">
                                     <div
                                       className="relative h-full overflow-hidden"
                                       style={{
-                                        width: `${masteryBarFillPct}%`,
+                                        width: `${collectionBarFillPct}%`,
                                         transition: `width ${collectionFtueMasteryBarFastReset ? 90 : 250}ms cubic-bezier(0.25, 1, 0.5, 1)`,
                                         borderTopRightRadius: 9999,
                                         borderBottomRightRadius: 9999,
@@ -5804,7 +5848,7 @@ export default function App() {
                                           padding: 1,
                                           borderTopRightRadius: 9999,
                                           borderBottomRightRadius: 9999,
-                                          background: 'linear-gradient(180deg, #d2e894 0%, #8fb33a 100%)',
+                                          background: 'linear-gradient(180deg, #c2e3f6 0%, #2d77b5 100%)',
                                         }}
                                       >
                                         <div
@@ -5812,7 +5856,7 @@ export default function App() {
                                           style={{
                                             borderTopRightRadius: 9999,
                                             borderBottomRightRadius: 9999,
-                                            background: 'linear-gradient(180deg, #b8d458 0%, #8fb33a 100%)',
+                                            background: 'linear-gradient(180deg, #7fc8eb 0%, #559dcf 100%)',
                                           }}
                                         />
                                       </div>
@@ -6543,9 +6587,8 @@ export default function App() {
                     setPlayerLevelProgress(0);
                     if (unlockInfo.navigateToBarnOnUnlock) {
                       setActiveScreen('BARN');
-                      const seg = PLANT_MASTERY_ORDERS_PER_SEGMENT;
                       skipNextBarnPendingBounceRef.current = true;
-                      setPlantMastery((m) => {
+                        setPlantMastery((m) => {
                         if (m.unlockedLevels.includes(1)) return m;
                         const unlockPending = m.unlockPending.includes(1)
                           ? m.unlockPending
@@ -6553,7 +6596,7 @@ export default function App() {
                         return {
                           ...m,
                           targetLevel: 1,
-                          ordersProgress: seg,
+                          ordersProgress: PLANT_COLLECTION_FTUE_INTRO_BAR_TOTAL,
                           unlockPending,
                           plantMasteryIntroBarComplete: true,
                         };
@@ -6767,7 +6810,7 @@ export default function App() {
                           window.setTimeout(() => {
                             triggerMasteryPurchaseReveal(level);
                             if (wasCollectionFtuePopup) {
-                              // Immediately roll mastery bar to next plant (fast): 50/50 → 0/50, icon shows plant 2.
+                              // Immediately roll collection bar to player-level sync (fast); icon shows plant 2.
                               setCollectionFtueMasteryBarFastReset(true);
                               window.setTimeout(() => {
                                 setPlantMastery((m) => {
