@@ -49,13 +49,14 @@ export const GAME_SAVE_VERSION = 1 as const;
 /** Full buffer of normal goals before a +1 discovery order may spawn. Same curve as runtime discovery pacing. */
 export function getDiscoveryGoalBuffer(highestPlant: number): number {
   const h = Math.max(0, Math.floor(highestPlant));
-  if (h <= 3) return 4;
-  if (h <= 4) return 6;
-  if (h <= 5) return 9;
-  if (h <= 6) return 12;
-  if (h <= 7) return 14;
-  if (h <= 8) return 16;
-  if (h <= 9) return 18;
+  if (h <= 3) return 3;
+  if (h <= 4) return 5;
+  if (h <= 5) return 8;
+  if (h <= 6) return 10;
+  if (h <= 7) return 12;
+  if (h <= 8) return 14;
+  if (h <= 9) return 16;
+  if (h <= 10) return 18;
   return 20;
 }
 

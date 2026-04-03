@@ -9,7 +9,12 @@ import {
   getCropYieldPerHarvest,
 } from '../components/UpgradeList';
 import { normalizeBarnShelvesUnlocked } from '../constants/barnShelves';
-import { GAME_SAVE_VERSION, type GameSaveV1, getDiscoveryGoalBuffer } from './gameSave';
+import {
+  GAME_SAVE_VERSION,
+  deriveGoalDiscoveryLightGreenActive,
+  type GameSaveV1,
+  getDiscoveryGoalBuffer,
+} from './gameSave';
 
 const getHexDistance = (q: number, r: number): number => (Math.abs(q) + Math.abs(r) + Math.abs(q + r)) / 2;
 
@@ -40,6 +45,9 @@ export function createPostFtueCleanSave(): GameSaveV1 {
   const playerLevel = 1;
   const cropYieldLevel = getCropYieldPerHarvest(cropsState);
   const req = postFtueGoalCropRequired(playerLevel, cropYieldLevel);
+  const goalSlots: GameSaveV1['goalSlots'] = ['green', 'green', 'green', 'empty', 'empty'];
+  const goalPlantTypes = [1, 2, 3, 0, 0];
+  const highestPlantEver = 1;
 
   return {
     v: GAME_SAVE_VERSION,
@@ -54,7 +62,7 @@ export function createPostFtueCleanSave(): GameSaveV1 {
     harvestState,
     cropsState,
     seedsInStorage: 5,
-    highestPlantEver: 1,
+    highestPlantEver,
     playerLevel,
     playerLevelProgress: 0,
     plantMasteryGoalsCompleted: 0,
@@ -70,18 +78,19 @@ export function createPostFtueCleanSave(): GameSaveV1 {
     isExpanded: false,
     rewardedOffers: [],
     barnNotification: false,
-    goalSlots: ['green', 'green', 'green', 'empty', 'empty'],
-    goalPlantTypes: [1, 2, 3, 0, 0],
+    goalSlots,
+    goalPlantTypes,
     goalLoadingSeconds: 15,
     goalCounts: [req, req, req, 0, 0],
     goalAmountsRequired: [req, req, req, 0, 0],
     goalCompletedValues: [0, 0, 0, 0, 0],
     goalDisplayOrder: [0, 1, 2],
+    goalDiscoveryLightGreenActive: deriveGoalDiscoveryLightGreenActive(goalSlots, goalPlantTypes, highestPlantEver),
     coinGoalVisible: false,
     coinGoalValue: 0,
     coinGoalTimeRemaining: 30,
     newGoalsSinceDiscovery: 0,
-    discoveryGoalsRemaining: getDiscoveryGoalBuffer(1),
+    discoveryGoalsRemaining: getDiscoveryGoalBuffer(highestPlantEver),
     lastMergeDiscoveryLevel: 1,
     /** Matches starter orders 1→2→3 so “Last goal” HUD shows plant 3 after clear. */
     lastSpawnedGoalLevels: [2, 3],
