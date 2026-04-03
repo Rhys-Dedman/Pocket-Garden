@@ -76,6 +76,7 @@ import {
   type GameSaveV1,
   GAME_SAVE_VERSION,
   getDiscoveryGoalBuffer,
+  deriveGoalDiscoveryLightGreenActive,
 } from './utils/gameSave';
 import { createPostFtueCleanSave } from './utils/postFtueCleanSave';
 import { isOfflineCoinEarningsBlockedByFtue, simulateOfflineSeedHarvest, simulateWildGrowthOffline } from './utils/offlineSimulate';
@@ -114,6 +115,9 @@ const getMaxGoalSlots = (playerLevel: number): number =>
 
 /** Plant Collection barn UI (shelves, mastery bar, bonuses button) — navigation stays open; data keeps updating while locked. */
 const PLANT_COLLECTION_UI_UNLOCK_LEVEL = 5;
+/** Collection FTUE: fake full bar (15/15) until intro clears; icon shows this level instead of real player level. */
+const PLANT_COLLECTION_FTUE_INTRO_BAR_TOTAL = 15;
+const PLANT_COLLECTION_FTUE_INTRO_DISPLAY_PLAYER_LEVEL = 4;
 /** Collection FTUE: after “View Collection”, defer hole + finger until barn slide finishes. */
 const COLLECTION_FTUE_INTRO_CTA_OVERLAY_DELAY_MS = 600;
 
@@ -675,7 +679,7 @@ type PlantMasterySlice = {
   targetLevel: number;
   unlockPending: number[];
   unlockedLevels: number[];
-  /** First barn visit from L5: fake 50/50 + plant 1 mastered until next goal. */
+  /** First barn visit from L5: fake 4 + 15/15 bar, then real L5 + 0/20 after intro clears. */
   plantMasteryIntroBarComplete: boolean;
 };
 
@@ -1114,7 +1118,7 @@ export default function App() {
   } | null>(null);
   /** After “View Collection” → barn, wait for the screen slide to finish before measuring the golden-pot CTA + finger. */
   const [collectionFtueIntroCtaOverlayReady, setCollectionFtueIntroCtaOverlayReady] = useState(false);
-  /** Collection FTUE: fast “50/50 → 0/50” slide when first pot turns gold. */
+  /** Collection FTUE: fast bar reset when first pot turns gold (intro → player-level sync). */
   const [collectionFtueMasteryBarFastReset, setCollectionFtueMasteryBarFastReset] = useState(false);
   const goldenPotBonusesWasOpenRef = useRef(false);
   /** Paid store purchase confirmation (IAP stub); Collect fires boost particles + activation. */
@@ -1263,10 +1267,8 @@ export default function App() {
   const lastMergeDiscoveryLevelRef = useRef(0); // highest level when we last synced remaining; discovery only when this === current highest (same "cycle")
   /** [second-to-last, last] spawned goal plant tier; matches initial goals [1,2,3] → last committed is 3. Persisted. */
   const lastSpawnedGoalLevelsRef = useRef<[number, number]>([2, 3]);
-  /** Top-bar debug: last committed goal plant tier (mirrors tuple [1]; updated on every spawn including discovery). */
+  /** Last committed goal plant tier for variety / anti-collision (mirrors tuple [1]; updated on every spawn including discovery). */
   const lastSpawnedGoalPlantLevelHUDRef = useRef(3);
-  /** Top-bar: goals until discovery order (mirrors discoveryGoalsRemainingRef); 0 if discovery already on board; -1 if max plants. */
-  const discoveryGoalsUntilHUDRef = useRef(0);
   const lastProcessedGoalLoadingSlotRef = useRef<number | null>(null); // prevent duplicate pick/increment when effect runs twice (e.g. Strict Mode) for same loading slot
   /** Prevents double goal pick when React Strict Mode runs `setGoalLoadingSeconds` updater twice on the same tick. */
   const goalCountdownSpawnLockRef = useRef(false);
@@ -1288,6 +1290,12 @@ export default function App() {
   ]);
   const discoveryGoalLightGreenDismissedRef = useRef<boolean[]>([false, false, false, false, false]);
   discoveryGoalLightGreenDismissedRef.current = discoveryGoalLightGreenDismissed;
+  /** Discovery-order light-green art until first harvest impact (persists across merge that discovers the tier). */
+  const [goalDiscoveryLightGreenActive, setGoalDiscoveryLightGreenActive] = useState<boolean[]>([
+    false, false, false, false, false,
+  ]);
+  const goalDiscoveryLightGreenActiveRef = useRef<boolean[]>([false, false, false, false, false]);
+  goalDiscoveryLightGreenActiveRef.current = goalDiscoveryLightGreenActive;
   /** True briefly after FTUE 11 spawns the 1/2/3 goals so only plant 3 can use the light-green frame. */
   const [ftue11ThreePlantGoalWindowActive, setFtue11ThreePlantGoalWindowActive] = useState(false);
   const [goalBounceSlots, setGoalBounceSlots] = useState<number[]>([]); // slots currently bouncing (panel down)
@@ -1404,6 +1412,8 @@ export default function App() {
     }
   }, [plantMastery.unlockedLevels.length]);
   const skipNextBarnPendingBounceRef = useRef(false);
+  const plantMasteryLevelSyncInitRef = useRef(false);
+  const prevPlayerLevelForMasteryRef = useRef(playerLevel);
 
   /** One increment per collected goal — same moment as player level XP (not on plant-panel impact; avoids double-count). */
   const applyGoalCollectedProgress = useCallback(() => {
@@ -1415,35 +1425,45 @@ export default function App() {
           ...m,
           plantMasteryIntroBarComplete: false,
           targetLevel: 2,
-          ordersProgress: 1,
+          ordersProgress: 0,
         };
       }
       if (m.targetLevel === 24 && m.ordersProgress >= seg) {
         return m;
       }
-      const nextP = m.ordersProgress + 1;
-      if (nextP < seg) {
-        return { ...m, ordersProgress: nextP };
-      }
+      return m;
+    });
+  }, []);
+
+  /** After Collection FTUE intro: advancing player level by 1 queues the next golden-pot tier (replaces 50-order segments). */
+  useEffect(() => {
+    if (!plantMasteryLevelSyncInitRef.current) {
+      plantMasteryLevelSyncInitRef.current = true;
+      prevPlayerLevelForMasteryRef.current = playerLevel;
+      return;
+    }
+    const prev = prevPlayerLevelForMasteryRef.current;
+    if (playerLevel !== prev + 1) {
+      prevPlayerLevelForMasteryRef.current = playerLevel;
+      return;
+    }
+    prevPlayerLevelForMasteryRef.current = playerLevel;
+    if (playerLevel < PLANT_COLLECTION_UI_UNLOCK_LEVEL) return;
+    setPlantMastery((m) => {
+      if (m.plantMasteryIntroBarComplete) return m;
+      if (m.targetLevel >= 24) return m;
       const pending = m.unlockPending.includes(m.targetLevel)
         ? m.unlockPending
         : [...m.unlockPending, m.targetLevel].sort((a, b) => a - b);
-      if (m.targetLevel < 24) {
-        return {
-          ordersProgress: 0,
-          targetLevel: m.targetLevel + 1,
-          unlockPending: pending,
-          unlockedLevels: m.unlockedLevels,
-        };
-      }
       return {
-        ordersProgress: seg,
-        targetLevel: 24,
+        ...m,
+        ordersProgress: 0,
+        targetLevel: m.targetLevel + 1,
         unlockPending: pending,
         unlockedLevels: m.unlockedLevels,
       };
     });
-  }, []);
+  }, [playerLevel]);
 
   // Testing cheat: instantly complete the current mastery segment.
   const completeMasterySegmentCheat = useCallback(() => {
@@ -1829,32 +1849,6 @@ export default function App() {
 
   useEffect(() => { highestPlantEverRef.current = highestPlantEver; }, [highestPlantEver]);
 
-  useEffect(() => {
-    const tick = () => {
-      const h = effectiveHighestPlantEverForDiscovery(highestPlantEverRef, highestPlantEverStateRef);
-      const remaining = discoveryGoalsRemainingRef.current;
-      const slots = goalSlotsRef.current;
-      const types = goalPlantTypesRef.current;
-      if (h >= 24) {
-        discoveryGoalsUntilHUDRef.current = -1;
-        return;
-      }
-      const hasDiscoveryOrder = slots.some(
-        (s, i) =>
-          (s === 'green' || s === 'loading' || s === 'completed') && (types[i] ?? 0) === h + 1
-      );
-      if (hasDiscoveryOrder) {
-        discoveryGoalsUntilHUDRef.current = 0;
-        return;
-      }
-      const buffer = getDiscoveryGoalBuffer(h);
-      discoveryGoalsUntilHUDRef.current = Math.min(buffer, Math.max(0, remaining));
-    };
-    tick();
-    const id = window.setInterval(tick, 100);
-    return () => clearInterval(id);
-  }, []);
-
   const toContainerRect = useCallback((r: DOMRect): FtueRect | null => {
     const container = containerRef.current;
     const s = appScaleRef.current || 1;
@@ -1901,6 +1895,7 @@ export default function App() {
       recordSpawnedGoalPlantLevel(1, lastSpawnedGoalLevelsRef, lastSpawnedGoalPlantLevelHUDRef);
       recordSpawnedGoalPlantLevel(2, lastSpawnedGoalLevelsRef, lastSpawnedGoalPlantLevelHUDRef);
       setDiscoveryGoalLightGreenDismissed((p) => { const n = [...p]; n[0] = false; n[1] = false; return n; });
+      setGoalDiscoveryLightGreenActive((p) => { const n = [...p]; n[0] = false; n[1] = false; return n; });
       setGoalCounts((c) => { const n = [...c]; n[0] = 5; n[1] = 3; return n; });
       setGoalAmountsRequired((a) => { const n = [...a]; n[0] = 5; n[1] = 3; return n; });
       setGoalDisplayOrder([0, 1]);
@@ -2231,12 +2226,23 @@ export default function App() {
     ? 1 
     : Math.min(1, (viewportWidth - barnPadding) / barnDesignWidth);
 
-  const masterySeg = PLANT_MASTERY_ORDERS_PER_SEGMENT;
-  const masteryBarNumerator =
-    plantMastery.targetLevel === 24 && plantMastery.ordersProgress >= masterySeg
-      ? masterySeg
-      : plantMastery.ordersProgress;
-  const masteryBarFillPct = (masteryBarNumerator / masterySeg) * 100;
+  /** Barn Plant Collection bar: FTUE intro = fake full bar; then mirrors player level progress (same as header). */
+  const collectionBarGoalsRequired = getGoalsRequiredForLevel(playerLevel);
+  const collectionBarIntroActive = plantMastery.plantMasteryIntroBarComplete;
+  const collectionBarDisplayPlayerLevel = collectionBarIntroActive
+    ? PLANT_COLLECTION_FTUE_INTRO_DISPLAY_PLAYER_LEVEL
+    : playerLevel;
+  const collectionBarNumerator = collectionBarIntroActive
+    ? PLANT_COLLECTION_FTUE_INTRO_BAR_TOTAL
+    : playerLevelProgress;
+  const collectionBarDenominator = collectionBarIntroActive
+    ? PLANT_COLLECTION_FTUE_INTRO_BAR_TOTAL
+    : collectionBarGoalsRequired;
+  const collectionBarFillPct = collectionBarIntroActive
+    ? 100
+    : collectionBarGoalsRequired > 0
+      ? (playerLevelProgress / collectionBarGoalsRequired) * 100
+      : 0;
   const isPlantCollectionUiUnlocked = playerLevel >= PLANT_COLLECTION_UI_UNLOCK_LEVEL;
   const collectionFtueActive = collectionFtuePhase != null && !collectionFtueCompleted;
   const hideBonusesForCollectionFtue =
@@ -2771,6 +2777,18 @@ export default function App() {
         n[loadingIdx] = false;
         return n;
       });
+      const hSpawn = effectiveHighestPlantEverForDiscovery(highestPlantEverRef, highestPlantEverStateRef);
+      const markDiscoveryLightGreen = isDiscoveryLightGreenEligible(
+        ftue11PersistenceEnabledRef.current,
+        ftue11ThreePlantGoalWindowActive,
+        plantLevel,
+        hSpawn
+      );
+      setGoalDiscoveryLightGreenActive((p) => {
+        const n = [...p];
+        n[loadingIdx] = markDiscoveryLightGreen;
+        return n;
+      });
       const cropYieldLevel = cropsState?.crop_value?.level ?? 0;
       const goalRequired = getGoalCropRequired(playerLevel, cropYieldLevel);
       setGoalCounts((c) => {
@@ -2920,7 +2938,17 @@ export default function App() {
         goalIntervalRef.current = null;
       }
     };
-  }, [isLoading, goalSlots, goalSlotFadeInSlot, harvestState, playerLevel, cropsState, activeBoosts, goldenPotCount]);
+  }, [
+    isLoading,
+    goalSlots,
+    goalSlotFadeInSlot,
+    harvestState,
+    playerLevel,
+    cropsState,
+    activeBoosts,
+    goldenPotCount,
+    ftue11ThreePlantGoalWindowActive,
+  ]);
 
   // When player levels up and unlocks a new goal slot, start loading in that slot if empty and no other loading
   useEffect(() => {
@@ -3041,6 +3069,13 @@ export default function App() {
         return next;
       });
       setDiscoveryGoalLightGreenDismissed((prev) => {
+        const next = [...prev];
+        slotsToUpgrade.forEach((slotIdx) => {
+          next[slotIdx] = false;
+        });
+        return next;
+      });
+      setGoalDiscoveryLightGreenActive((prev) => {
         const next = [...prev];
         slotsToUpgrade.forEach((slotIdx) => {
           next[slotIdx] = false;
@@ -4537,6 +4572,13 @@ export default function App() {
     setGoalSlots(save.goalSlots);
     setGoalPlantTypes(save.goalPlantTypes);
     setDiscoveryGoalLightGreenDismissed([false, false, false, false, false]);
+    if (Array.isArray(save.goalDiscoveryLightGreenActive) && save.goalDiscoveryLightGreenActive.length === 5) {
+      setGoalDiscoveryLightGreenActive(save.goalDiscoveryLightGreenActive.map((x) => x === true));
+    } else {
+      setGoalDiscoveryLightGreenActive(
+        deriveGoalDiscoveryLightGreenActive(save.goalSlots, save.goalPlantTypes, save.highestPlantEver)
+      );
+    }
     setGoalLoadingSeconds(save.goalLoadingSeconds);
     setGoalCounts(save.goalCounts);
     setGoalAmountsRequired(save.goalAmountsRequired);
@@ -4805,6 +4847,7 @@ export default function App() {
       goalAmountsRequired,
       goalCompletedValues,
       goalDisplayOrder,
+      goalDiscoveryLightGreenActive: [...goalDiscoveryLightGreenActive],
       coinGoalVisible,
       coinGoalValue,
       coinGoalTimeRemaining,
@@ -5146,8 +5189,6 @@ export default function App() {
                       const state = buildLimitedOfferPopupState(boost.offerId, { activeBoostEndTime: boost.endTime, highestPlantEver });
                       if (state) setLimitedOfferPopup(state);
                     }}
-                    debugLastSpawnedGoalLevelRef={lastSpawnedGoalPlantLevelHUDRef}
-                    debugDiscoveryGoalsUntilRef={discoveryGoalsUntilHUDRef}
                   />
                 ) : (
                   <div className="min-h-[44px] shrink-0" aria-hidden />
@@ -5195,10 +5236,11 @@ export default function App() {
                     hForDiscoveryUi
                   );
                   const lightGreenDismissed = discoveryGoalLightGreenDismissed[slotIdx];
+                  const lightGreenHeldAfterDiscover = goalDiscoveryLightGreenActive[slotIdx];
                   const showLightGreenDiscoveryFrame =
                     showGreenContent &&
                     !showCompletedContent &&
-                    lightGreenEligible &&
+                    (lightGreenEligible || lightGreenHeldAfterDiscover) &&
                     !lightGreenDismissed;
                   const goalImpactActive = goalImpactSlots.includes(slotIdx) && !isCompletedState;
                   const handleCompletedTap = () => {
@@ -5275,6 +5317,7 @@ export default function App() {
                       setGoalSlots((s) => { const n = [...s]; n[slotIdx] = 'empty'; return n; });
                       setGoalPlantTypes((p) => { const n = [...p]; n[slotIdx] = 0; return n; });
                       setDiscoveryGoalLightGreenDismissed((p) => { const n = [...p]; n[slotIdx] = false; return n; });
+                      setGoalDiscoveryLightGreenActive((p) => { const n = [...p]; n[slotIdx] = false; return n; });
                       setGoalCompletedValues((v) => { const n = [...v]; n[slotIdx] = 0; return n; });
                       setGoalSlidingUpSlots((prev) => { const next = new Set(prev); next.delete(slotIdx); return next; });
                       setGoalDisplayOrder((prev) => prev.filter((i) => i !== slotIdx));
@@ -6013,18 +6056,36 @@ export default function App() {
                                 marginBottom: 8,
                               }}
                             >
-                              <span className="block">Complete orders to unlock golden pots.</span>
+                              <span className="block">Level Ups now unlock golden Pots.</span>
                               <span className="block">Earn bonuses as you collect them.</span>
                             </p>
-                            {/* Plant mastery: outer bar flat L/R; green fill has curved right “head” */}
-                            <div className="flex items-center justify-center gap-0 w-full" style={{ marginTop: 0, marginLeft: -2 }}>
-                              <img
-                                src={assetPath('/assets/icons/icon_plantmastery.png')}
-                                alt=""
-                                className="w-[36px] h-[36px] object-contain shrink-0 relative z-20"
-                                style={{ marginLeft: 8, marginRight: -8 }}
-                                draggable={false}
-                              />
+                            {/* Plant collection progress: same blues as player level bar; left icon matches header level. */}
+                            <div
+                              className="flex items-center justify-center gap-0 w-full"
+                              style={{ marginTop: 0, transform: 'translateX(2px)' }}
+                            >
+                              <span
+                                className="flex items-center justify-center leading-none shrink-0 relative z-20 w-10 h-10"
+                                style={{ marginLeft: 7, marginRight: -9, transform: 'translate(1px, -1px)' }}
+                              >
+                                <img
+                                  src={assetPath('/assets/icons/icon_level.png')}
+                                  alt=""
+                                  className="w-10 h-10 object-contain"
+                                  draggable={false}
+                                />
+                                <span
+                                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center font-black leading-none pointer-events-none"
+                                  style={{
+                                    color: '#c8e9eb',
+                                    fontSize: 13,
+                                    WebkitTextStroke: '1px rgba(0,0,0,0.5)',
+                                    paintOrder: 'stroke fill',
+                                  }}
+                                >
+                                  {collectionBarDisplayPlayerLevel}
+                                </span>
+                              </span>
                               <div
                                 className="relative inline-flex items-center border overflow-hidden"
                                 style={{
@@ -6044,13 +6105,13 @@ export default function App() {
                                       paintOrder: 'stroke fill',
                                     }}
                                   >
-                                    {masteryBarNumerator}/{masterySeg}
+                                    {collectionBarNumerator}/{collectionBarDenominator}
                                   </span>
                                   <div className="w-full h-full overflow-hidden bg-[#775041]">
                                     <div
                                       className="relative h-full overflow-hidden"
                                       style={{
-                                        width: `${masteryBarFillPct}%`,
+                                        width: `${collectionBarFillPct}%`,
                                         transition: `width ${collectionFtueMasteryBarFastReset ? 90 : 250}ms cubic-bezier(0.25, 1, 0.5, 1)`,
                                         borderTopRightRadius: 9999,
                                         borderBottomRightRadius: 9999,
@@ -6062,7 +6123,7 @@ export default function App() {
                                           padding: 1,
                                           borderTopRightRadius: 9999,
                                           borderBottomRightRadius: 9999,
-                                          background: 'linear-gradient(180deg, #d2e894 0%, #8fb33a 100%)',
+                                          background: 'linear-gradient(180deg, #c2e3f6 0%, #2d77b5 100%)',
                                         }}
                                       >
                                         <div
@@ -6070,7 +6131,7 @@ export default function App() {
                                           style={{
                                             borderTopRightRadius: 9999,
                                             borderBottomRightRadius: 9999,
-                                            background: 'linear-gradient(180deg, #b8d458 0%, #8fb33a 100%)',
+                                            background: 'linear-gradient(180deg, #7fc8eb 0%, #559dcf 100%)',
                                           }}
                                         />
                                       </div>
@@ -6321,8 +6382,6 @@ export default function App() {
                         const state = buildLimitedOfferPopupState(boost.offerId, { activeBoostEndTime: boost.endTime, highestPlantEver });
                         if (state) setLimitedOfferPopup(state);
                       }}
-                      debugLastSpawnedGoalLevelRef={lastSpawnedGoalPlantLevelHUDRef}
-                      debugDiscoveryGoalsUntilRef={discoveryGoalsUntilHUDRef}
                       hideTopBarBg
                       hideFps
                     />
@@ -6690,6 +6749,12 @@ export default function App() {
                           next[slotIdx] = false;
                           return next;
                         });
+                        const hFtue11 = Math.max(0, Math.floor(highestPlantEverRef.current));
+                        setGoalDiscoveryLightGreenActive((prev) => {
+                          const next = [...prev];
+                          next[slotIdx] = isDiscoveryLightGreenEligible(true, true, level, hFtue11);
+                          return next;
+                        });
                         setGoalCounts((prev) => {
                           const next = [...prev];
                           next[slotIdx] = required;
@@ -6795,7 +6860,6 @@ export default function App() {
                     setPlayerLevelProgress(0);
                     if (unlockInfo.navigateToBarnOnUnlock) {
                       setActiveScreen('BARN');
-                      const seg = PLANT_MASTERY_ORDERS_PER_SEGMENT;
                       skipNextBarnPendingBounceRef.current = true;
                       setPlantMastery((m) => {
                         if (m.unlockedLevels.includes(1)) return m;
@@ -6805,7 +6869,7 @@ export default function App() {
                         return {
                           ...m,
                           targetLevel: 1,
-                          ordersProgress: seg,
+                          ordersProgress: PLANT_COLLECTION_FTUE_INTRO_BAR_TOTAL,
                           unlockPending,
                           plantMasteryIntroBarComplete: true,
                         };
@@ -6923,6 +6987,7 @@ export default function App() {
                     setGoalSlots(['green', 'empty', 'empty', 'empty', 'empty']);
                     setGoalPlantTypes([2, 0, 0, 0, 0]);
                     setDiscoveryGoalLightGreenDismissed([false, false, false, false, false]);
+                    setGoalDiscoveryLightGreenActive([false, false, false, false, false]);
                     recordSpawnedGoalPlantLevel(2, lastSpawnedGoalLevelsRef, lastSpawnedGoalPlantLevelHUDRef);
                     setGoalCounts([3, 0, 0, 0, 0]);
                     setGoalAmountsRequired([3, 0, 0, 0, 0]);
@@ -7019,7 +7084,7 @@ export default function App() {
                           window.setTimeout(() => {
                             triggerMasteryPurchaseReveal(level);
                             if (wasCollectionFtuePopup) {
-                              // Immediately roll mastery bar to next plant (fast): 50/50 → 0/50, icon shows plant 2.
+                              // Immediately roll collection bar to player-level sync (fast); icon shows plant 2.
                               setCollectionFtueMasteryBarFastReset(true);
                               window.setTimeout(() => {
                                 setPlantMastery((m) => {
@@ -7531,12 +7596,13 @@ export default function App() {
               onImpact={(goalSlotIdx, amount) => {
                 const plantLevelAtHit = goalPlantTypes[goalSlotIdx] ?? goalSlotIdx + 1;
                 const hHit = highestPlantEverRef.current;
-                const eligibleHit = isDiscoveryLightGreenEligible(
-                  ftue11PersistenceEnabledRef.current,
-                  ftue11ThreePlantGoalWindowActive,
-                  plantLevelAtHit,
-                  hHit
-                );
+                const eligibleHit =
+                  isDiscoveryLightGreenEligible(
+                    ftue11PersistenceEnabledRef.current,
+                    ftue11ThreePlantGoalWindowActive,
+                    plantLevelAtHit,
+                    hHit
+                  ) || goalDiscoveryLightGreenActiveRef.current[goalSlotIdx];
                 if (
                   eligibleHit &&
                   amount > 0 &&
@@ -7546,6 +7612,12 @@ export default function App() {
                   dNext[goalSlotIdx] = true;
                   discoveryGoalLightGreenDismissedRef.current = dNext;
                   setDiscoveryGoalLightGreenDismissed(dNext);
+                  setGoalDiscoveryLightGreenActive((prev) => {
+                    const n = [...prev];
+                    n[goalSlotIdx] = false;
+                    goalDiscoveryLightGreenActiveRef.current = n;
+                    return n;
+                  });
                 }
 
                 goalInFlightHarvestBySlotRef.current[goalSlotIdx] = Math.max(0, (goalInFlightHarvestBySlotRef.current[goalSlotIdx] ?? 0) - amount);
