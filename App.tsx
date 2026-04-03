@@ -74,6 +74,7 @@ import {
   clearGameSave,
   type GameSaveV1,
   GAME_SAVE_VERSION,
+  getDiscoveryGoalBuffer,
 } from './utils/gameSave';
 import { createPostFtueCleanSave } from './utils/postFtueCleanSave';
 import { isOfflineCoinEarningsBlockedByFtue, simulateOfflineSeedHarvest, simulateWildGrowthOffline } from './utils/offlineSimulate';
@@ -130,6 +131,59 @@ const getGoalsRequiredForLevel = (level: number): number => {
 
 /** Goal difficulty scaling: 0.9 = easier, 1.0 = normal, 1.1 = harder, 1.2 = much harder */
 const GOAL_DIFFICULTY_SCALING = 1.0;
+
+/**
+ * Strict Mode / duplicate updaters may run one logical spawn twice; one monotonic id per commit so remaining drops by at most 1.
+ */
+let goalDiscoverySpawnCommitSeq = 0;
+let lastAppliedGoalDiscoverySpawnCommitSeq = -1;
+
+function applyDiscoveryRemainingAfterSpawn(
+  commitSeq: number,
+  plantLevel: number,
+  highestPlantEverMergeRef: { current: number },
+  highestPlantEverStateRef: { current: number },
+  remainingRef: { current: number }
+): void {
+  if (lastAppliedGoalDiscoverySpawnCommitSeq === commitSeq) return;
+  lastAppliedGoalDiscoverySpawnCommitSeq = commitSeq;
+  const h = Math.max(highestPlantEverMergeRef.current, highestPlantEverStateRef.current);
+  if (plantLevel > h) {
+    remainingRef.current = getDiscoveryGoalBuffer(h);
+  } else {
+    remainingRef.current = Math.max(0, remainingRef.current - 1);
+  }
+}
+
+/** Authoritative highest for discovery: ref can lead/lag state for one tick — never use the lower of the two. */
+function effectiveHighestPlantEverForDiscovery(
+  mergeRef: { current: number },
+  stateRef: { current: number }
+): number {
+  return Math.max(mergeRef.current, stateRef.current);
+}
+
+/**
+ * When `dueDiscovery` was captured at spawn start (counter at 0, no live discovery elsewhere),
+ * force exactly `effectiveHighest + 1`. Re-reads slot refs so sibling state is fresh.
+ */
+function finalizeDiscoveryGoalPlantLevelForSpawn(
+  plantLevel: number,
+  loadingIdx: number,
+  dueDiscovery: boolean,
+  mergeRef: { current: number },
+  stateRef: { current: number },
+  goalSlotsRef: { current: ('empty' | 'loading' | 'green' | 'completed')[] },
+  goalPlantTypesRef: { current: number[] }
+): number {
+  if (!dueDiscovery) return plantLevel;
+  const h = effectiveHighestPlantEverForDiscovery(mergeRef, stateRef);
+  if (h >= 24) return plantLevel;
+  const slots = goalSlotsRef.current;
+  const types = goalPlantTypesRef.current;
+  if (hasActiveDiscoveryGoalOnBoard(slots, types, loadingIdx, h)) return plantLevel;
+  return h + 1;
+}
 
 /** Goal crop impact: clear bounce/flash after this many ms (matches ~500ms keyframes). */
 const GOAL_IMPACT_CLEAR_MS = 400;
@@ -342,80 +396,181 @@ function normalizeActiveBoostsAfterLoad(boosts: ActiveBoostData[]): ActiveBoostD
   return merged;
 }
 
-/** Number of NEW goals that must spawn after "discovering a plant" (merge) before we may show one +1 discovery goal. Only reset when player discovers by merge. */
-const getDiscoveryGoalBuffer = (highestPlant: number): number => {
-  const h = Math.max(0, Math.floor(highestPlant));
-  if (h <= 3) return 3;
-  if (h <= 4) return 5;
-  if (h <= 5) return 8;
-  if (h <= 6) return 10;
-  if (h <= 7) return 12;
-  if (h <= 8) return 14;
-  if (h <= 9) return 16;
-  if (h <= 10) return 18;
-  return 20;
-};
-
 /** Discovery popup coin reward = `getCoinValueForLevel(plant)` × this (before Double Coins boost). */
 const PLANT_DISCOVERY_COIN_MULTIPLIER = 10;
 
+/** After every committed goal plant level (loading→green), including discovery `highest+1` and FTUE spawns. Keeps save tuple + HUD in sync. */
+function recordSpawnedGoalPlantLevel(
+  plantLevel: number,
+  tupleRef: { current: [number, number] },
+  hudRef: { current: number }
+): void {
+  tupleRef.current = [tupleRef.current[1], plantLevel];
+  hudRef.current = plantLevel;
+}
+
+/** Plant tiers already used by other goal slots (green / loading / completed). Excludes `exceptSlotIdx` (the slot we are filling). */
+function collectOccupiedGoalPlantTiers(
+  slots: ('empty' | 'loading' | 'green' | 'completed')[],
+  types: number[],
+  exceptSlotIdx: number
+): Set<number> {
+  const out = new Set<number>();
+  slots.forEach((st, i) => {
+    if (i === exceptSlotIdx) return;
+    if (st !== 'green' && st !== 'loading' && st !== 'completed') return;
+    const t = types[i] ?? 0;
+    if (t >= 1) out.add(t);
+  });
+  return out;
+}
+
+/** Same as `collectOccupiedGoalPlantTiers` but only green/loading — completed orders must not block the next discovery spawn. */
+function collectOccupiedGoalPlantTiersActive(
+  slots: ('empty' | 'loading' | 'green' | 'completed')[],
+  types: number[],
+  exceptSlotIdx: number
+): Set<number> {
+  const out = new Set<number>();
+  slots.forEach((st, i) => {
+    if (i === exceptSlotIdx) return;
+    if (st !== 'green' && st !== 'loading') return;
+    const t = types[i] ?? 0;
+    if (t >= 1) out.add(t);
+  });
+  return out;
+}
+
+/** True if another slot already has a live discovery-order tier (`highest + 1`). Completed slots do not count. */
+function hasActiveDiscoveryGoalOnBoard(
+  slots: ('empty' | 'loading' | 'green' | 'completed')[],
+  types: number[],
+  exceptSlotIdx: number,
+  highestPlantEver: number
+): boolean {
+  if (highestPlantEver >= 24) return false;
+  const d = highestPlantEver + 1;
+  return slots.some(
+    (s, i) =>
+      i !== exceptSlotIdx &&
+      (s === 'green' || s === 'loading') &&
+      (types[i] ?? 0) === d
+  );
+}
+
+function tiersInRangeAvoidingForbidden(
+  minL: number,
+  maxL: number,
+  forbidden: Set<number>
+): number[] {
+  const c: number[] = [];
+  for (let L = minL; L <= maxL; L++) {
+    if (!forbidden.has(L)) c.push(L);
+  }
+  return c;
+}
+
+/**
+ * If `chosen` collides with `forbidden`, pick another tier (preferred band → seed floor..discovered → discovery or duplicate).
+ * Discovery fallback only when `allowDiscoveryTierFallback` (counter exhausted + no discovery order already on board).
+ */
+function resolveGoalPlantLevelAgainstForbidden(
+  chosen: number,
+  forbidden: Set<number>,
+  highestPlantEver: number,
+  minLevel: number,
+  seedLevel: number,
+  allowDiscoveryTierFallback: boolean
+): number {
+  if (chosen > highestPlantEver) return chosen;
+  if (!forbidden.has(chosen)) return chosen;
+  const maxDiscovered = Math.min(24, Math.max(1, highestPlantEver));
+  const effectiveMin = Math.max(minLevel, seedLevel);
+  const seedFloor = Math.max(1, seedLevel);
+  const bands = [
+    tiersInRangeAvoidingForbidden(effectiveMin, maxDiscovered, forbidden),
+    tiersInRangeAvoidingForbidden(seedFloor, maxDiscovered, forbidden),
+  ];
+  for (const pool of bands) {
+    if (pool.length > 0) return pool[Math.floor(Math.random() * pool.length)];
+  }
+  if (
+    allowDiscoveryTierFallback &&
+    highestPlantEver < 24 &&
+    !forbidden.has(highestPlantEver + 1)
+  ) {
+    return highestPlantEver + 1;
+  }
+  for (let L = effectiveMin; L <= maxDiscovered; L++) {
+    return L;
+  }
+  for (let L = seedFloor; L <= maxDiscovered; L++) {
+    return L;
+  }
+  return chosen;
+}
+
 /**
  * Pick plant level for a new goal.
- * - "Discovering a plant" = merging to a new highest level. Only that event starts/resets the counter.
- * - Counter = new goals spawned since last merge discovery. We ONLY reset it in handleMerge when they discover.
- * - Discovery goal (highest+1) is ONLY allowed when: (1) NO discovery goal on board, (2) counter >= buffer. Impossible before that.
- * - If a discovery goal is already on board, we only show normal goals until they reach that level (then it's no longer discovery).
- * - Variety: last = last SPAWNED goal (loading→active). Next goal must NEVER be the same as last (no 2 same in a row). Call site updates lastSpawnedRef after every spawn.
+ * - `lastCommitted`: last HUD spawn tier before this pick (frozen snapshot).
+ * - `occupiedSiblingTiers`: tiers already on other goal slots — never duplicate these when any alternative exists.
  */
 const pickGoalPlantLevel = (
   highestPlantEver: number,
   minLevel: number,
   seedLevel: number,
-  newGoalsSinceDiscoveryRef: { current: number },
+  discoveryGoalsRemainingRef: { current: number },
   lastMergeDiscoveryLevelRef: { current: number },
-  lastSpawnedRef: { current: [number, number] },
+  lastCommitted: number,
+  occupiedSiblingTiers: Set<number>,
+  occupiedActiveSiblingTiers: Set<number>,
   hasDiscoveryGoalOnBoard: boolean
 ): number => {
-  const effectiveMin = Math.max(minLevel, seedLevel);
-  const maxForRandom = Math.min(24, highestPlantEver);
-  const buffer = getDiscoveryGoalBuffer(highestPlantEver);
-  const [secondLast, last] = lastSpawnedRef.current;
+  const forbiddenBase = (): Set<number> => {
+    const f = new Set(occupiedSiblingTiers);
+    if (lastCommitted >= 1) f.add(lastCommitted);
+    return f;
+  };
+  /** Only other live slots can block the next discovery tier — not lastCommitted (can be stale after completes). */
+  const forbiddenDiscovery = (): Set<number> => new Set(occupiedActiveSiblingTiers);
 
-  const pickRandomWithVariety = (): number => {
-    const levels: number[] = [];
-    for (let L = effectiveMin; L <= maxForRandom; L++) levels.push(L);
-    if (levels.length === 0) return Math.max(seedLevel, Math.min(24, effectiveMin));
-    // Absolutely never pick the same level as last spawned (loading→active); goals can complete out of order.
-    let pool = last > 0 ? levels.filter((L) => L !== last) : levels;
-    if (pool.length === 0) {
-      // Only one level in range and it's the same as last – pick nearest other level to avoid repeat
-      if (last - 1 >= effectiveMin) pool = [last - 1];
-      else if (last + 1 <= maxForRandom) pool = [last + 1];
-      else pool = [last]; // unavoidable (e.g. only level 1 in range)
+  const pickRandomNormalGoal = (): number => {
+    const effectiveMin = Math.max(minLevel, seedLevel);
+    const maxForRandom = Math.min(24, highestPlantEver);
+    const forbidden = forbiddenBase();
+    const preferred = tiersInRangeAvoidingForbidden(effectiveMin, maxForRandom, forbidden);
+    if (preferred.length > 0) {
+      return preferred[Math.floor(Math.random() * preferred.length)];
     }
-    // Also avoid 3 in a row (secondLast === last and we'd pick last again – already excluded above)
-    if (secondLast === last && last > 0 && pool.length > 1) {
-      const nextPool = pool.filter((L) => L !== last);
-      if (nextPool.length > 0) pool = nextPool;
+    const seedFloor = Math.max(1, seedLevel);
+    const wide = tiersInRangeAvoidingForbidden(seedFloor, maxForRandom, forbidden);
+    if (wide.length > 0) {
+      return wide[Math.floor(Math.random() * wide.length)];
     }
-    const level = pool[Math.floor(Math.random() * pool.length)];
-    return Math.max(seedLevel, Math.min(24, level));
+    if (effectiveMin <= maxForRandom) {
+      const levels: number[] = [];
+      for (let L = effectiveMin; L <= maxForRandom; L++) levels.push(L);
+      return levels[Math.floor(Math.random() * levels.length)];
+    }
+    return Math.max(seedLevel, Math.min(24, effectiveMin));
   };
 
-  // Discovery goal already on board: only normal goals. Call site will increment counter for this spawn.
   if (hasDiscoveryGoalOnBoard) {
-    return pickRandomWithVariety();
+    return pickRandomNormalGoal();
   }
-  // Wrong "cycle": player discovered a new plant but counter wasn't reset. Recover.
   if (lastMergeDiscoveryLevelRef.current !== highestPlantEver) {
     lastMergeDiscoveryLevelRef.current = highestPlantEver;
-    newGoalsSinceDiscoveryRef.current = 0;
+    // Do not refill remaining here — that erases real countdown progress when lastMerge was stale vs hydrate/highest.
   }
-  // Strict: discovery ONLY after buffer new goals. When allowed, next goal is 100% discovery (highest+1), not a chance.
-  if (highestPlantEver < 24 && newGoalsSinceDiscoveryRef.current >= buffer) {
-    return highestPlantEver + 1;
+  if (highestPlantEver < 24 && discoveryGoalsRemainingRef.current <= 0) {
+    const nextDiscover = highestPlantEver + 1;
+    const forbidden = forbiddenDiscovery();
+    if (forbidden.has(nextDiscover)) {
+      return pickRandomNormalGoal();
+    }
+    return nextDiscover;
   }
-  return pickRandomWithVariety();
+  return pickRandomNormalGoal();
 };
 
 /** Crops required for goal order. Scales with player level (+1 base every 2 levels), crop yield, and has random variation. */
@@ -939,6 +1094,9 @@ export default function App() {
   const [cropsState, setCropsState] = useState<Record<string, UpgradeState>>(createInitialCropsState);
   const [highestPlantEver, setHighestPlantEver] = useState(1); // Track highest plant level ever created
   const highestPlantEverRef = useRef(1);
+  /** Latest committed React state — mergeRef can update before re-render; max(merge, state) is the real highest for goals. */
+  const highestPlantEverStateRef = useRef(highestPlantEver);
+  highestPlantEverStateRef.current = highestPlantEver;
   const [seedsInStorage, setSeedsInStorage] = useState(5); // Start 5/5; max grows with Storage Capacity (15)
   
   // Discovery popup state
@@ -1099,13 +1257,19 @@ export default function App() {
   const goalPlantTypesRef = useRef(goalPlantTypes);
   goalSlotsRef.current = goalSlots;
   goalPlantTypesRef.current = goalPlantTypes;
-  const newGoalsSinceDiscoveryRef = useRef(0); // NEW goals spawned since last discovery (merge); discovery shows after getDiscoveryGoalBuffer(highest) new goals
-  const lastMergeDiscoveryLevelRef = useRef(0); // highest level when we last reset the counter; only allow discovery when this === current highest (same "cycle")
-  const lastSpawnedGoalLevelsRef = useRef<[number, number]>([0, 0]); // [second-to-last, last] for variety (no 2 same in a row, never 3)
+  /** Normal goal spawns: −1. Merge to new highest or discovery spawn: refill to full buffer for that tier. */
+  const discoveryGoalsRemainingRef = useRef(getDiscoveryGoalBuffer(1));
+  const lastMergeDiscoveryLevelRef = useRef(0); // highest level when we last synced remaining; discovery only when this === current highest (same "cycle")
+  /** [second-to-last, last] spawned goal plant tier; matches initial goals [1,2,3] → last committed is 3. Persisted. */
+  const lastSpawnedGoalLevelsRef = useRef<[number, number]>([2, 3]);
+  /** Top-bar debug: last committed goal plant tier (mirrors tuple [1]; updated on every spawn including discovery). */
+  const lastSpawnedGoalPlantLevelHUDRef = useRef(3);
+  /** Top-bar: goals until discovery order (mirrors discoveryGoalsRemainingRef); 0 if discovery already on board; -1 if max plants. */
+  const discoveryGoalsUntilHUDRef = useRef(0);
   const lastProcessedGoalLoadingSlotRef = useRef<number | null>(null); // prevent duplicate pick/increment when effect runs twice (e.g. Strict Mode) for same loading slot
-  const nextGoalSpawnIdRef = useRef(0); // unique id per spawn so we can dedupe in setTimeout without confusing reused slot indices
-  const lastCommittedSpawnIdRef = useRef<number | null>(null); // only increment once per spawnId (same slot can load again for a different goal)
-  /** Supersedes stale preload completion when Strict Mode or a new spawn reuses the pipeline. */
+  /** Prevents double goal pick when React Strict Mode runs `setGoalLoadingSeconds` updater twice on the same tick. */
+  const goalCountdownSpawnLockRef = useRef(false);
+  const nextGoalSpawnIdRef = useRef(0);
   const goalSpawnPreloadTokenRef = useRef<{ loadingIdx: number; spawnId: number } | null>(null);
   const [goalLoadingSeconds, setGoalLoadingSeconds] = useState(15); // countdown 15->0 (Order Speed: 15 base - 2 per level)
   const [goalTransitionSlot, setGoalTransitionSlot] = useState<number | null>(null); // slot transitioning loading->green (for fade)
@@ -1664,6 +1828,32 @@ export default function App() {
 
   useEffect(() => { highestPlantEverRef.current = highestPlantEver; }, [highestPlantEver]);
 
+  useEffect(() => {
+    const tick = () => {
+      const h = effectiveHighestPlantEverForDiscovery(highestPlantEverRef, highestPlantEverStateRef);
+      const remaining = discoveryGoalsRemainingRef.current;
+      const slots = goalSlotsRef.current;
+      const types = goalPlantTypesRef.current;
+      if (h >= 24) {
+        discoveryGoalsUntilHUDRef.current = -1;
+        return;
+      }
+      const hasDiscoveryOrder = slots.some(
+        (s, i) =>
+          (s === 'green' || s === 'loading' || s === 'completed') && (types[i] ?? 0) === h + 1
+      );
+      if (hasDiscoveryOrder) {
+        discoveryGoalsUntilHUDRef.current = 0;
+        return;
+      }
+      const buffer = getDiscoveryGoalBuffer(h);
+      discoveryGoalsUntilHUDRef.current = Math.min(buffer, Math.max(0, remaining));
+    };
+    tick();
+    const id = window.setInterval(tick, 100);
+    return () => clearInterval(id);
+  }, []);
+
   const toContainerRect = useCallback((r: DOMRect): FtueRect | null => {
     const container = containerRef.current;
     const s = appScaleRef.current || 1;
@@ -1707,6 +1897,8 @@ export default function App() {
       ftue7SkipLoadingSlot0Ref.current = false;
       setGoalSlots((s) => { const n = [...s]; n[0] = 'green'; n[1] = 'green'; return n; });
       setGoalPlantTypes((p) => { const n = [...p]; n[0] = 1; n[1] = 2; return n; });
+      recordSpawnedGoalPlantLevel(1, lastSpawnedGoalLevelsRef, lastSpawnedGoalPlantLevelHUDRef);
+      recordSpawnedGoalPlantLevel(2, lastSpawnedGoalLevelsRef, lastSpawnedGoalPlantLevelHUDRef);
       setDiscoveryGoalLightGreenDismissed((p) => { const n = [...p]; n[0] = false; n[1] = false; return n; });
       setGoalCounts((c) => { const n = [...c]; n[0] = 5; n[1] = 3; return n; });
       setGoalAmountsRequired((a) => { const n = [...a]; n[0] = 5; n[1] = 3; return n; });
@@ -2550,94 +2742,172 @@ export default function App() {
     }
     if (goalIntervalRef.current) clearInterval(goalIntervalRef.current);
 
-    const beginSpawnFromLoadingSlot = (hasRush: boolean) => {
+    const commitSpawnVisuals = (
+      plantLevel: number,
+      discoveryCommitSeq: number,
+      rush: boolean
+    ) => {
+      recordSpawnedGoalPlantLevel(plantLevel, lastSpawnedGoalLevelsRef, lastSpawnedGoalPlantLevelHUDRef);
+      applyDiscoveryRemainingAfterSpawn(
+        discoveryCommitSeq,
+        plantLevel,
+        highestPlantEverRef,
+        highestPlantEverStateRef,
+        discoveryGoalsRemainingRef
+      );
+      const existing = goalPlantTypesRef.current;
+      const patchedTypes = [...(existing ?? [])];
+      while (patchedTypes.length <= loadingIdx) patchedTypes.push(0);
+      patchedTypes[loadingIdx] = plantLevel;
+      goalPlantTypesRef.current = patchedTypes;
+      setGoalPlantTypes((p) => {
+        const n = [...p];
+        n[loadingIdx] = plantLevel;
+        return n;
+      });
+      setDiscoveryGoalLightGreenDismissed((p) => {
+        const n = [...p];
+        n[loadingIdx] = false;
+        return n;
+      });
+      const cropYieldLevel = cropsState?.crop_value?.level ?? 0;
+      const goalRequired = getGoalCropRequired(playerLevel, cropYieldLevel);
+      setGoalCounts((c) => {
+        const next = [...c];
+        next[loadingIdx] = goalRequired;
+        return next;
+      });
+      setGoalAmountsRequired((a) => {
+        const next = [...a];
+        next[loadingIdx] = goalRequired;
+        return next;
+      });
+      requestAnimationFrame(() => requestAnimationFrame(() => setGoalTransitionFade(true)));
+      setTimeout(() => {
+        lastProcessedGoalLoadingSlotRef.current = null;
+        const maxSlots = getMaxGoalSlots(playerLevel);
+        const firstEmptyIdx = goalSlots.findIndex((s, i) => s === 'empty' && i < maxSlots);
+        setGoalBounceSlots((prev) => prev.filter((s) => s !== loadingIdx));
+        setGoalSlots((slotsIn) => {
+          const next = [...slotsIn];
+          next[loadingIdx] = 'green';
+          if (firstEmptyIdx >= 0) next[firstEmptyIdx] = 'loading';
+          return next;
+        });
+        if (firstEmptyIdx >= 0) {
+          setGoalDisplayOrder((prev) => (prev.includes(firstEmptyIdx) ? prev : [...prev, firstEmptyIdx]));
+          setGoalSlotFadeInSlot(firstEmptyIdx);
+          setGoalLoadingSeconds(rush ? 0 : getGoalLoadingSeconds(harvestState, goldenPotCount));
+          setTimeout(() => setGoalSlotFadeInSlot(null), 500);
+        }
+        setGoalTransitionSlot(null);
+        setGoalTransitionFade(false);
+      }, 500);
+    };
+
+    const pickPlantAndPreloadCommit = (discoveryCommitSeq: number, rush: boolean) => {
       const minLevel = getPremiumOrdersMinLevel(harvestState);
-      const seedLevel = getSeedLevelFromHighestPlant(highestPlantEverRef.current);
+      const hDisc = effectiveHighestPlantEverForDiscovery(highestPlantEverRef, highestPlantEverStateRef);
+      const seedLevel = getSeedLevelFromHighestPlant(hDisc);
       const slots = goalSlotsRef.current;
       const types = goalPlantTypesRef.current;
-      const highest = highestPlantEverRef.current;
-      const hasDiscoveryOnBoard = slots.some(
-        (s, i) => i !== loadingIdx && s === 'green' && (types[i] ?? 0) === highest + 1
-      );
-      const plantLevel = pickGoalPlantLevel(
-        highest,
+      const hasDiscoveryOnBoard = hasActiveDiscoveryGoalOnBoard(slots, types, loadingIdx, hDisc);
+      const dueDiscovery =
+        hDisc < 24 && discoveryGoalsRemainingRef.current <= 0 && !hasDiscoveryOnBoard;
+      const occupiedSiblings = collectOccupiedGoalPlantTiers(slots, types, loadingIdx);
+      const occupiedActiveSiblings = collectOccupiedGoalPlantTiersActive(slots, types, loadingIdx);
+      const lastCommittedSnapshot = lastSpawnedGoalPlantLevelHUDRef.current;
+      let plantLevel = pickGoalPlantLevel(
+        hDisc,
         minLevel,
         seedLevel,
-        newGoalsSinceDiscoveryRef,
+        discoveryGoalsRemainingRef,
         lastMergeDiscoveryLevelRef,
-        lastSpawnedGoalLevelsRef,
+        lastCommittedSnapshot,
+        occupiedSiblings,
+        occupiedActiveSiblings,
         hasDiscoveryOnBoard
       );
+      const allowDiscoveryTierFallback =
+        discoveryGoalsRemainingRef.current <= 0 && !hasDiscoveryOnBoard;
+      const forbid1 = new Set(occupiedSiblings);
+      if (lastCommittedSnapshot >= 1) forbid1.add(lastCommittedSnapshot);
+      plantLevel = resolveGoalPlantLevelAgainstForbidden(
+        plantLevel,
+        forbid1,
+        hDisc,
+        minLevel,
+        seedLevel,
+        allowDiscoveryTierFallback
+      );
+      const occupiedNow = collectOccupiedGoalPlantTiers(goalSlotsRef.current, goalPlantTypesRef.current, loadingIdx);
+      const forbid2 = new Set(occupiedNow);
+      const hudNow = lastSpawnedGoalPlantLevelHUDRef.current;
+      if (hudNow >= 1) forbid2.add(hudNow);
+      plantLevel = resolveGoalPlantLevelAgainstForbidden(
+        plantLevel,
+        forbid2,
+        hDisc,
+        minLevel,
+        seedLevel,
+        allowDiscoveryTierFallback
+      );
+      plantLevel = finalizeDiscoveryGoalPlantLevelForSpawn(
+        plantLevel,
+        loadingIdx,
+        dueDiscovery,
+        highestPlantEverRef,
+        highestPlantEverStateRef,
+        goalSlotsRef,
+        goalPlantTypesRef
+      );
+
       const spawnId = nextGoalSpawnIdRef.current++;
       goalSpawnPreloadTokenRef.current = { loadingIdx, spawnId };
       void preloadGoalOrderIcon(plantLevel).then(() => {
         const t = goalSpawnPreloadTokenRef.current;
         if (!t || t.loadingIdx !== loadingIdx || t.spawnId !== spawnId) return;
-        lastSpawnedGoalLevelsRef.current = [lastSpawnedGoalLevelsRef.current[1], plantLevel];
-        setGoalBounceSlots((prev) => (prev.includes(loadingIdx) ? prev : [...prev, loadingIdx]));
-        setGoalTransitionSlot(loadingIdx);
-        setGoalTransitionFade(false);
-        setGoalPlantTypes((p) => {
-          const n = [...p];
-          n[loadingIdx] = plantLevel;
-          return n;
-        });
-        setDiscoveryGoalLightGreenDismissed((p) => {
-          const n = [...p];
-          n[loadingIdx] = false;
-          return n;
-        });
-        const cropYieldLevel = cropsState?.crop_value?.level ?? 0;
-        const goalRequired = getGoalCropRequired(playerLevel, cropYieldLevel);
-        setGoalCounts((c) => {
-          const next = [...c];
-          next[loadingIdx] = goalRequired;
-          return next;
-        });
-        setGoalAmountsRequired((a) => {
-          const next = [...a];
-          next[loadingIdx] = goalRequired;
-          return next;
-        });
-        requestAnimationFrame(() => requestAnimationFrame(() => setGoalTransitionFade(true)));
-        setTimeout(() => {
-          lastProcessedGoalLoadingSlotRef.current = null;
-          const alreadyCommitted = lastCommittedSpawnIdRef.current === spawnId;
-          if (!alreadyCommitted && plantLevel <= highest) newGoalsSinceDiscoveryRef.current++;
-          lastCommittedSpawnIdRef.current = spawnId;
-          const maxSlots = getMaxGoalSlots(playerLevel);
-          const firstEmptyIdx = goalSlots.findIndex((s, i) => s === 'empty' && i < maxSlots);
-          setGoalBounceSlots((prev) => prev.filter((s) => s !== loadingIdx));
-          setGoalSlots((slotArr) => {
-            const next = [...slotArr];
-            next[loadingIdx] = 'green';
-            if (firstEmptyIdx >= 0) next[firstEmptyIdx] = 'loading';
-            return next;
-          });
-          if (firstEmptyIdx >= 0) {
-            setGoalDisplayOrder((prev) => (prev.includes(firstEmptyIdx) ? prev : [...prev, firstEmptyIdx]));
-            setGoalSlotFadeInSlot(firstEmptyIdx);
-            setGoalLoadingSeconds(hasRush ? 0 : getGoalLoadingSeconds(harvestState, goldenPotCount));
-            setTimeout(() => setGoalSlotFadeInSlot(null), 500);
-          }
-          setGoalTransitionSlot(null);
-          setGoalTransitionFade(false);
-        }, 500);
+        commitSpawnVisuals(plantLevel, discoveryCommitSeq, rush);
       });
     };
 
     if (effectiveGoalLoadingSeconds <= 0) {
-      beginSpawnFromLoadingSlot(hasRushOrdersBoost);
+      const discoverySpawnCommitSeq = ++goalDiscoverySpawnCommitSeq;
+      setGoalBounceSlots((prev) => (prev.includes(loadingIdx) ? prev : [...prev, loadingIdx]));
+      setGoalTransitionSlot(loadingIdx);
+      setGoalTransitionFade(false);
+      pickPlantAndPreloadCommit(discoverySpawnCommitSeq, hasRushOrdersBoost);
       return () => {};
     }
     goalIntervalRef.current = setInterval(() => {
+      let discoveryCommitSeqForThisIntervalTick: number | null = null;
       setGoalLoadingSeconds((prev) => {
         if (prev <= 1) {
-          if (goalIntervalRef.current) {
-            clearInterval(goalIntervalRef.current);
-            goalIntervalRef.current = null;
+          if (goalCountdownSpawnLockRef.current) {
+            if (goalIntervalRef.current) {
+              clearInterval(goalIntervalRef.current);
+              goalIntervalRef.current = null;
+            }
+            return 0;
           }
-          beginSpawnFromLoadingSlot(hasRushOrdersBoost);
+          if (discoveryCommitSeqForThisIntervalTick === null) {
+            discoveryCommitSeqForThisIntervalTick = ++goalDiscoverySpawnCommitSeq;
+          }
+          goalCountdownSpawnLockRef.current = true;
+          try {
+            if (goalIntervalRef.current) {
+              clearInterval(goalIntervalRef.current);
+              goalIntervalRef.current = null;
+            }
+            setGoalBounceSlots((p) => (p.includes(loadingIdx) ? p : [...p, loadingIdx]));
+            setGoalTransitionSlot(loadingIdx);
+            setGoalTransitionFade(false);
+            pickPlantAndPreloadCommit(discoveryCommitSeqForThisIntervalTick!, hasRushOrdersBoost);
+          } finally {
+            queueMicrotask(() => {
+              goalCountdownSpawnLockRef.current = false;
+            });
+          }
           return 0;
         }
         return prev - 1;
@@ -3962,7 +4232,7 @@ export default function App() {
     if (newLevel != null && newLevel > highestPlantEverRef.current) {
       setHighestPlantEver(newLevel);
       highestPlantEverRef.current = newLevel; // Sync ref so next goal spawn sees new level immediately
-      newGoalsSinceDiscoveryRef.current = 0; // ONLY reset here: "discovering a plant" = merge to new highest. Counter for next discovery goal starts now.
+      discoveryGoalsRemainingRef.current = getDiscoveryGoalBuffer(newLevel);
       lastMergeDiscoveryLevelRef.current = newLevel; // same "cycle": only allow discovery when current highest === this (never use pre-merge count)
       // Show discovery popup immediately when merge starts (feels more responsive)
       setDiscoveryPopup({ isVisible: true, level: newLevel });
@@ -4274,9 +4544,19 @@ export default function App() {
     setCoinGoalVisible(save.coinGoalVisible);
     setCoinGoalValue(save.coinGoalValue);
     setCoinGoalTimeRemaining(save.coinGoalTimeRemaining);
-    newGoalsSinceDiscoveryRef.current = save.newGoalsSinceDiscovery;
+    {
+      const hDisc = save.highestPlantEver;
+      const buf = getDiscoveryGoalBuffer(hDisc);
+      if (save.discoveryGoalsRemaining != null && Number.isFinite(save.discoveryGoalsRemaining)) {
+        discoveryGoalsRemainingRef.current = Math.min(buf, Math.max(0, Math.floor(save.discoveryGoalsRemaining)));
+      } else {
+        discoveryGoalsRemainingRef.current = Math.max(0, buf - (save.newGoalsSinceDiscovery ?? 0));
+      }
+    }
     lastMergeDiscoveryLevelRef.current = save.lastMergeDiscoveryLevel;
-    lastSpawnedGoalLevelsRef.current = [...save.lastSpawnedGoalLevels] as [number, number];
+    const loadedSpawned = [...save.lastSpawnedGoalLevels] as [number, number];
+    lastSpawnedGoalLevelsRef.current = loadedSpawned;
+    lastSpawnedGoalPlantLevelHUDRef.current = loadedSpawned[1] ?? 0;
     setActiveFtueStage(save.activeFtueStage);
     setFtue2SeedFireCount(save.ftue2SeedFireCount);
     setFtue2FadingOut(save.ftue2FadingOut);
@@ -4527,7 +4807,11 @@ export default function App() {
       coinGoalVisible,
       coinGoalValue,
       coinGoalTimeRemaining,
-      newGoalsSinceDiscovery: newGoalsSinceDiscoveryRef.current,
+      newGoalsSinceDiscovery: Math.max(
+        0,
+        getDiscoveryGoalBuffer(highestPlantEver) - discoveryGoalsRemainingRef.current
+      ),
+      discoveryGoalsRemaining: discoveryGoalsRemainingRef.current,
       lastMergeDiscoveryLevel: lastMergeDiscoveryLevelRef.current,
       lastSpawnedGoalLevels: [...lastSpawnedGoalLevelsRef.current] as [number, number],
       activeFtueStage,
@@ -4861,6 +5145,8 @@ export default function App() {
                       const state = buildLimitedOfferPopupState(boost.offerId, { activeBoostEndTime: boost.endTime, highestPlantEver });
                       if (state) setLimitedOfferPopup(state);
                     }}
+                    debugLastSpawnedGoalLevelRef={lastSpawnedGoalPlantLevelHUDRef}
+                    debugDiscoveryGoalsUntilRef={discoveryGoalsUntilHUDRef}
                   />
                 ) : (
                   <div className="min-h-[44px] shrink-0" aria-hidden />
@@ -6019,6 +6305,8 @@ export default function App() {
                         const state = buildLimitedOfferPopupState(boost.offerId, { activeBoostEndTime: boost.endTime, highestPlantEver });
                         if (state) setLimitedOfferPopup(state);
                       }}
+                      debugLastSpawnedGoalLevelRef={lastSpawnedGoalPlantLevelHUDRef}
+                      debugDiscoveryGoalsUntilRef={discoveryGoalsUntilHUDRef}
                       hideTopBarBg
                       hideFps
                     />
@@ -6380,6 +6668,7 @@ export default function App() {
                           next[slotIdx] = level;
                           return next;
                         });
+                        recordSpawnedGoalPlantLevel(level, lastSpawnedGoalLevelsRef, lastSpawnedGoalPlantLevelHUDRef);
                         setDiscoveryGoalLightGreenDismissed((prev) => {
                           const next = [...prev];
                           next[slotIdx] = false;
@@ -6618,6 +6907,7 @@ export default function App() {
                     setGoalSlots(['green', 'empty', 'empty', 'empty', 'empty']);
                     setGoalPlantTypes([2, 0, 0, 0, 0]);
                     setDiscoveryGoalLightGreenDismissed([false, false, false, false, false]);
+                    recordSpawnedGoalPlantLevel(2, lastSpawnedGoalLevelsRef, lastSpawnedGoalPlantLevelHUDRef);
                     setGoalCounts([3, 0, 0, 0, 0]);
                     setGoalAmountsRequired([3, 0, 0, 0, 0]);
                     setGoalDisplayOrder([0]);
@@ -6978,7 +7268,7 @@ export default function App() {
                 const newLevel = highestPlantEver + 1;
                 setHighestPlantEver(newLevel);
                 highestPlantEverRef.current = newLevel;
-                newGoalsSinceDiscoveryRef.current = 0;
+                discoveryGoalsRemainingRef.current = getDiscoveryGoalBuffer(newLevel);
                 lastMergeDiscoveryLevelRef.current = newLevel;
                 discoveryLevelAfterPauseCloseRef.current = newLevel; // latest only; popup when pause closes
               }}

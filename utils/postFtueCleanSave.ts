@@ -9,7 +9,7 @@ import {
   getCropYieldPerHarvest,
 } from '../components/UpgradeList';
 import { normalizeBarnShelvesUnlocked } from '../constants/barnShelves';
-import { GAME_SAVE_VERSION, type GameSaveV1 } from './gameSave';
+import { GAME_SAVE_VERSION, type GameSaveV1, getDiscoveryGoalBuffer } from './gameSave';
 
 const getHexDistance = (q: number, r: number): number => (Math.abs(q) + Math.abs(r) + Math.abs(q + r)) / 2;
 
@@ -81,8 +81,10 @@ export function createPostFtueCleanSave(): GameSaveV1 {
     coinGoalValue: 0,
     coinGoalTimeRemaining: 30,
     newGoalsSinceDiscovery: 0,
+    discoveryGoalsRemaining: getDiscoveryGoalBuffer(1),
     lastMergeDiscoveryLevel: 1,
-    lastSpawnedGoalLevels: [0, 0],
+    /** Matches starter orders 1→2→3 so “Last goal” HUD shows plant 3 after clear. */
+    lastSpawnedGoalLevels: [2, 3],
     activeFtueStage: null,
     ftue2SeedFireCount: 0,
     ftue2FadingOut: false,
