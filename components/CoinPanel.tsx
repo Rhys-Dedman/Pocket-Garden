@@ -79,6 +79,8 @@ export const CoinPanel: React.FC<CoinPanelProps> = ({
   const trailThreshold = getPerformanceMode() ? 4 : SKIP_TRAIL_WHEN_PANELS_ABOVE;
   if (activePanelCount > trailThreshold) skipTrailLifetimeRef.current = true;
   const useTrail = activePanelCount <= trailThreshold && !skipTrailLifetimeRef.current;
+  const useTrailRef = useRef(useTrail);
+  useTrailRef.current = useTrail;
 
   const [phase, setPhase] = useState<'reveal' | 'hold' | 'moveToWallet' | 'trailOnly'>('reveal');
   const [pos, setPos] = useState<Point>({ x: data.startX, y: data.startY });
@@ -98,6 +100,16 @@ export const CoinPanel: React.FC<CoinPanelProps> = ({
   const impactFiredRef = useRef(false);
   const trailOnlyStartRef = useRef<number>(0);
   const rafRef = useRef<number>(0);
+  const phaseRef = useRef<'reveal' | 'hold' | 'moveToWallet' | 'trailOnly'>('reveal');
+  const completeScheduledRef = useRef(false);
+  const onImpactRef = useRef(onImpact);
+  const onCompleteRef = useRef(onComplete);
+  onImpactRef.current = onImpact;
+  onCompleteRef.current = onComplete;
+  const dataRef = useRef(data);
+  dataRef.current = data;
+  const appScaleRef = useRef(appScale);
+  appScaleRef.current = appScale;
 
   // Panel full size (flexible width by content); 50% smaller overall
   const effectiveScale = SIZE_SCALE * (data.scale ?? 1);
@@ -116,53 +128,64 @@ export const CoinPanel: React.FC<CoinPanelProps> = ({
   useEffect(() => {
     const container = containerRef.current;
     const wallet = walletRef.current;
-    const iconEl = walletIconRef?.current ?? wallet;
     if (!container || !wallet) return;
 
     const getWalletTarget = (): Point => {
-      const el = iconEl || wallet;
+      const el = walletIconRef?.current ?? walletRef.current;
+      if (!el) return { x: 0, y: 0 };
       const wr = el.getBoundingClientRect();
       const cr = container.getBoundingClientRect();
+      const s = appScaleRef.current;
       return {
-        x: (wr.left + wr.width / 2 - cr.left) / appScale,
-        y: (wr.top + wr.height / 2 - cr.top) / appScale,
+        x: (wr.left + wr.width / 2 - cr.left) / s,
+        y: (wr.top + wr.height / 2 - cr.top) / s,
       };
+    };
+
+    const finishAndDespawn = () => {
+      if (completeScheduledRef.current) return;
+      completeScheduledRef.current = true;
+      if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; }
+      onCompleteRef.current();
     };
 
     const tick = () => {
       const now = Date.now();
       const elapsed = now - startTimeRef.current;
+      const d = dataRef.current;
+      const bg = d.panelBg ?? PANEL_BG;
 
-      if (phase === 'reveal') {
+      if (phaseRef.current === 'reveal') {
         const t = Math.min(elapsed / REVEAL_MS, 1);
-        // Ease-out: fast start, ease into full stop
         const eased = 1 - Math.pow(1 - t, 1.8);
-        const x = data.startX + (data.hoverX - data.startX) * eased;
-        const y = data.startY + (data.hoverY - data.startY) * eased;
+        const x = d.startX + (d.hoverX - d.startX) * eased;
+        const y = d.startY + (d.hoverY - d.startY) * eased;
         setPos({ x, y });
         setSizeScale({ w: eased, h: 0.5 + eased * 0.5 });
         setContentScale(eased);
         setContentOpacity(eased);
         if (t >= 1) {
+          phaseRef.current = 'hold';
           setPhase('hold');
         }
         rafRef.current = requestAnimationFrame(tick);
         return;
       }
 
-      if (phase === 'hold') {
+      if (phaseRef.current === 'hold') {
         const holdPhaseElapsed = elapsed - REVEAL_MS;
         const driftY = holdPhaseElapsed * DRIFT_PX_PER_MS;
-        const currentX = data.hoverX;
-        const currentY = data.hoverY - driftY;
+        const currentX = d.hoverX;
+        const currentY = d.hoverY - driftY;
         setPos({ x: currentX, y: currentY });
 
-        const holdEnd = REVEAL_MS + HOLD_MS + data.moveToWalletDelayMs;
+        const holdEnd = REVEAL_MS + HOLD_MS + d.moveToWalletDelayMs;
         if (elapsed >= holdEnd) {
+          phaseRef.current = 'moveToWallet';
           setPhase('moveToWallet');
           moveStartRef.current = now;
           moveStartPosRef.current = { x: currentX, y: currentY };
-          trailRef.current = [{ p: { x: currentX, y: currentY }, color: panelBgResolved }];
+          trailRef.current = [{ p: { x: currentX, y: currentY }, color: bg }];
         }
         setSizeScale({ w: 1, h: 1 });
         setContentScale(1);
@@ -171,7 +194,7 @@ export const CoinPanel: React.FC<CoinPanelProps> = ({
         return;
       }
 
-      if (phase === 'moveToWallet') {
+      if (phaseRef.current === 'moveToWallet') {
         const moveElapsed = now - moveStartRef.current;
         const t = Math.min(moveElapsed / MOVE_TO_WALLET_MS, 1);
         const eased = t * t * t * t;
@@ -183,11 +206,9 @@ export const CoinPanel: React.FC<CoinPanelProps> = ({
         const y = (1 - eased) * (1 - eased) * start.y + 2 * (1 - eased) * eased * controlY + eased * eased * target.y;
         setPos({ x, y });
 
-        // Color: fade from panel fill to coin circle yellow over full travel
-        const currentColor = lerpHex(panelBgResolved, CIRCLE_BG, t);
+        const currentColor = lerpHex(bg, CIRCLE_BG, t);
         setBgColor(currentColor);
 
-        // First 20%: shrink to circle, fade content
         const shrinkT = Math.min(t / CIRCLE_SHRINK_PHASE, 1);
         const circleDiameter = panelHeight;
         const currentW = (panelWidth + (circleDiameter - panelWidth) * shrinkT) / panelWidth;
@@ -196,7 +217,7 @@ export const CoinPanel: React.FC<CoinPanelProps> = ({
         setIsCircle(shrinkT >= 1);
         setContentOpacity(1 - shrinkT);
 
-        if (useTrail) {
+        if (useTrailRef.current) {
           trailRef.current = [{ p: { x, y }, color: currentColor }, ...trailRef.current].slice(0, MAX_TRAIL_POINTS);
           setTrail([...trailRef.current]);
         }
@@ -204,13 +225,14 @@ export const CoinPanel: React.FC<CoinPanelProps> = ({
         if (t >= 1) {
           if (!impactFiredRef.current) {
             impactFiredRef.current = true;
-            onImpact(data.value);
+            onImpactRef.current(d.value);
           }
-          if (useTrail) {
+          if (useTrailRef.current) {
+            phaseRef.current = 'trailOnly';
             setPhase('trailOnly');
             trailOnlyStartRef.current = now;
           } else {
-            onComplete();
+            finishAndDespawn();
             return;
           }
         }
@@ -218,13 +240,13 @@ export const CoinPanel: React.FC<CoinPanelProps> = ({
         return;
       }
 
-      if (phase === 'trailOnly') {
+      if (phaseRef.current === 'trailOnly') {
         const trailElapsed = now - trailOnlyStartRef.current;
         const fade = Math.max(0, 1 - trailElapsed / TRAIL_FADE_AFTER_HIT_MS);
         setTrailOpacity(fade);
-        if (useTrail) setTrail([...trailRef.current]);
+        if (useTrailRef.current) setTrail([...trailRef.current]);
         if (fade <= 0) {
-          onComplete();
+          finishAndDespawn();
           return;
         }
         rafRef.current = requestAnimationFrame(tick);
@@ -235,8 +257,28 @@ export const CoinPanel: React.FC<CoinPanelProps> = ({
     };
 
     rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [phase, data, containerRef, walletRef, walletIconRef, onImpact, onComplete, useTrail]);
+    return () => {
+      if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.id]);
+
+  // Safety net: force-complete if animation is stuck (RAF starvation during heavy renders)
+  useEffect(() => {
+    const safetyMs = Math.max(3000, REVEAL_MS + HOLD_MS + data.moveToWalletDelayMs + MOVE_TO_WALLET_MS + TRAIL_FADE_AFTER_HIT_MS + 1500);
+    const timer = window.setTimeout(() => {
+      if (!impactFiredRef.current) {
+        impactFiredRef.current = true;
+        onImpactRef.current(data.value);
+      }
+      if (!completeScheduledRef.current) {
+        completeScheduledRef.current = true;
+        if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; }
+        onCompleteRef.current();
+      }
+    }, safetyMs);
+    return () => clearTimeout(timer);
+  }, [data.id, data.value, data.moveToWalletDelayMs]);
 
   const showPanel = phase === 'reveal' || phase === 'hold' || (phase === 'moveToWallet' && !isCircle);
   const showCircle = phase === 'moveToWallet' && isCircle;

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { FTUE_BLOCKER_TINT, FTUE_TEXTBOX, FTUE_TEXTBOX_DIVIDER_MARGIN_BOTTOM, FTUE_TEXTBOX_TEXT, FTUE_VISUAL_SCALE } from '../ftue/ftueTextboxStyles';
 import { assetPath } from '../utils/assetPath';
+import { playSfx, SFX_IDS } from '../utils/sfx';
 
 const FADE_IN_MS = 700;
 const FADE_OUT_MS = 400;
@@ -98,6 +99,7 @@ export const Ftue11Overlay: React.FC<Ftue11OverlayProps> = ({
             onPointerLeave={() => setButtonPressed(false)}
             onClick={() => {
               if (isFadingOut) return;
+              playSfx(SFX_IDS.uiConfirmReward);
               setButtonPressed(false);
               setIsFadingOut(true);
             }}

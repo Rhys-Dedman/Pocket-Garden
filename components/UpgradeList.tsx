@@ -204,6 +204,11 @@ interface UpgradeListProps {
   ftue10PurchaseButtonRef?: React.MutableRefObject<HTMLButtonElement | null>;
   /** FTUE 10: when true, disable scroll so only the purchase button can be interacted with */
   ftue10LockScroll?: boolean;
+  /**
+   * FTUE 10: while on Seeds tab pointing player at Garden tab (`panel_open_orders`), show Production Speed
+   * purchase as unaffordable so they don't tap it before switching tabs.
+   */
+  ftue10DisableSeedProductionPurchase?: boolean;
   /** Called after an upgrade is purchased (for FTUE 10 completion) */
   onUpgradePurchase?: (upgradeId: string) => void;
   /** Golden pots unlocked — some tiers supersede upgrade visuals and caps. */
@@ -639,7 +644,7 @@ export const createInitialHarvestState = (): Record<string, UpgradeState> => ({
   happy_customer: { level: 0, progress: 0 },
 });
 
-export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange, money, setMoney, seedsState: propsSeedsState, setSeedsState: propsSetSeedsState, harvestState: propsHarvestState, setHarvestState: propsSetHarvestState, cropsState: propsCropsState, setCropsState: propsSetCropsState, lockedCellCount = 0, onUnlockCell, fertilizableCellCount = 0, onFertilizeCell, highestPlantEver = 1, masteredPlantLevels = [], rewardedOffers = [], onRewardedOfferPanelClick, onRewardedOfferClick, playerLevel = 1, pendingUnlockUpgradeId = null, pendingOfferHighlightId = null, isExpanded = false, protectedOfferId = null, ftue10GreenFlashUpgradeId = null, ftue10PurchaseButtonRef, ftue10LockScroll = false, onUpgradePurchase, goldenPotCount = 0 }) => {
+export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange, money, setMoney, seedsState: propsSeedsState, setSeedsState: propsSetSeedsState, harvestState: propsHarvestState, setHarvestState: propsSetHarvestState, cropsState: propsCropsState, setCropsState: propsSetCropsState, lockedCellCount = 0, onUnlockCell, fertilizableCellCount = 0, onFertilizeCell, highestPlantEver = 1, masteredPlantLevels = [], rewardedOffers = [], onRewardedOfferPanelClick, onRewardedOfferClick, playerLevel = 1, pendingUnlockUpgradeId = null, pendingOfferHighlightId = null, isExpanded = false, protectedOfferId = null, ftue10GreenFlashUpgradeId = null, ftue10PurchaseButtonRef, ftue10LockScroll = false, ftue10DisableSeedProductionPurchase = false, onUpgradePurchase, goldenPotCount = 0 }) => {
   const [internalSeedsState, setInternalSeedsState] = useState<Record<string, UpgradeState>>(createInitialSeedsState);
   const seedsState = propsSeedsState ?? internalSeedsState;
   const setSeedsState = propsSetSeedsState ?? setInternalSeedsState;
@@ -1141,6 +1146,8 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
         const currentCost = getUpgradeCostValue(upgrade.id, state.level);
         const currentCostDisplay = getUpgradeCost(upgrade.id, state.level);
         const canAfford = money >= currentCost;
+        const effectiveCanAfford =
+          canAfford && !(ftue10DisableSeedProductionPurchase && upgrade.id === 'seed_production');
         const isFlashing = flashingIds.has(upgrade.id) || ftue10GreenFlashUpgradeId === upgrade.id;
         const isUnlockFlashing = unlockFlashIds.has(upgrade.id);
         const isPressed = pressedId === upgrade.id;
@@ -1255,22 +1262,22 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
               <button
                 ref={ftue10GreenFlashUpgradeId === upgrade.id && ftue10PurchaseButtonRef ? (el) => { ftue10PurchaseButtonRef.current = el; } : undefined}
                 id={ftue10GreenFlashUpgradeId === upgrade.id ? `ftue10-purchase-${upgrade.id}` : undefined}
-                onMouseDown={() => !isLocked && !isMaxed && canAfford && setPressedId(upgrade.id)}
+                onMouseDown={() => !isLocked && !isMaxed && effectiveCanAfford && setPressedId(upgrade.id)}
                 onMouseUp={() => setPressedId(null)}
                 onMouseLeave={() => setPressedId(null)}
-                onClick={() => !isLocked && !isMaxed && handleUpgrade(upgrade.id, category, state.level)} 
+                onClick={() => !isLocked && !isMaxed && effectiveCanAfford && handleUpgrade(upgrade.id, category, state.level)}
                 className={`relative flex items-center justify-center gap-1 min-w-[70px] h-8 transition-all border outline outline-1 ${
-                  !isLocked && !isMaxed && canAfford 
-                    ? 'active:translate-y-[2px] active:border-b-0 active:mb-[4px]' 
+                  !isLocked && !isMaxed && effectiveCanAfford
+                    ? 'active:translate-y-[2px] active:border-b-0 active:mb-[4px]'
                     : ''
                 } rounded-[8px] shadow-[inset_0_1px_1px_rgba(255,255,255,0.4)]`}
                 style={{
-                  backgroundColor: isLocked ? LOCKED_MAIN : (isPressed ? buttonActiveColor : (isMaxed || !canAfford ? buttonDisabledColor : buttonColor)),
-                  borderColor: isLocked ? LOCKED_DEPTH : (isPressed ? buttonActiveDepthColor : (isMaxed || !canAfford ? buttonDisabledDepthColor : buttonDepthColor)),
+                  backgroundColor: isLocked ? LOCKED_MAIN : (isPressed ? buttonActiveColor : (isMaxed || !effectiveCanAfford ? buttonDisabledColor : buttonColor)),
+                  borderColor: isLocked ? LOCKED_DEPTH : (isPressed ? buttonActiveDepthColor : (isMaxed || !effectiveCanAfford ? buttonDisabledDepthColor : buttonDepthColor)),
                   borderBottomWidth: isLocked ? '4px' : (isPressed ? '0px' : '4px'),
                   marginBottom: isLocked ? '0px' : (isPressed ? '4px' : '0px'),
-                  outlineColor: isLocked ? LOCKED_DEPTH : (isPressed ? buttonActiveDepthColor : (isMaxed || !canAfford ? buttonDisabledDepthColor : buttonDepthColor)),
-                  cursor: isLocked || isMaxed ? 'default' : undefined,
+                  outlineColor: isLocked ? LOCKED_DEPTH : (isPressed ? buttonActiveDepthColor : (isMaxed || !effectiveCanAfford ? buttonDisabledDepthColor : buttonDepthColor)),
+                  cursor: isLocked || isMaxed || !effectiveCanAfford ? 'default' : undefined,
                 }}
               >
                 {isLocked ? (
@@ -1317,7 +1324,7 @@ export const UpgradeList: React.FC<UpgradeListProps> = ({ activeTab, onTabChange
                         <span
                           className="text-[13px] font-black tracking-tighter"
                           style={{
-                            color: isPressed ? buttonActiveFontColor : (!canAfford ? buttonDisabledFontColor : buttonFontColor),
+                            color: isPressed ? buttonActiveFontColor : (!effectiveCanAfford ? buttonDisabledFontColor : buttonFontColor),
                           }}
                         >
                           {currentCostDisplay}

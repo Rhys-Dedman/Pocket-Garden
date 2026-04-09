@@ -126,6 +126,65 @@
             animation: goal-slide-up-exit 400ms ease-out forwards;
             pointer-events: none;
         }
+        /* Seed/harvest blocked tap: linear rise (constant speed) + scale bounce; opacity separate */
+        @keyframes side-action-toast-opacity {
+            0% {
+                opacity: 0;
+                animation-timing-function: ease-out;
+            }
+            12% {
+                opacity: 1;
+                animation-timing-function: linear;
+            }
+            22% {
+                opacity: 1;
+                animation-timing-function: linear;
+            }
+            100% {
+                opacity: 0;
+            }
+        }
+        /* translateY keyed to % of total travel so linear segments = constant upward velocity */
+        @keyframes side-action-toast-motion {
+            0% {
+                transform: translateY(0) scale(0.5);
+                animation-timing-function: linear;
+            }
+            12% {
+                transform: translateY(-3.6px) scale(1.1);
+                animation-timing-function: linear;
+            }
+            22% {
+                transform: translateY(-6.6px) scale(1);
+                animation-timing-function: linear;
+            }
+            100% {
+                transform: translateY(-30px) scale(1);
+            }
+        }
+        .side-action-toast-text {
+            display: block;
+            color: #fcf0c7;
+            font-weight: 800;
+            white-space: pre-line;
+            text-align: center;
+            transform-origin: center center;
+            animation:
+                side-action-toast-opacity 1.15s forwards,
+                side-action-toast-motion 1.15s forwards;
+            /* Outline at 50% black */
+            text-shadow:
+                0 0 1px rgba(0, 0, 0, 0.5),
+                1px 0 0 rgba(0, 0, 0, 0.5),
+                -1px 0 0 rgba(0, 0, 0, 0.5),
+                0 1px 0 rgba(0, 0, 0, 0.5),
+                0 -1px 0 rgba(0, 0, 0, 0.5),
+                1px 1px 0 rgba(0, 0, 0, 0.5),
+                -1px -1px 0 rgba(0, 0, 0, 0.5),
+                1px -1px 0 rgba(0, 0, 0, 0.5),
+                -1px 1px 0 rgba(0, 0, 0, 0.5),
+                0 2px 4px rgba(0, 0, 0, 0.225);
+        }
         /* FTUE 4: same up/down motion, 6px down, loop forever (no white flash) */
         @keyframes goal-bounce-ftue4 {
             0% { transform: translateY(0); }

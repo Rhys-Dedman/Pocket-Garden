@@ -62,6 +62,11 @@ export const BoostParticle: React.FC<BoostParticleProps> = ({
   const trailOnlyStartRef = useRef<number>(0);
   const phaseRef = useRef<'moving' | 'trailOnly'>('moving');
   const rafRef = useRef<number>(0);
+  const completeScheduledRef = useRef(false);
+  const onImpactRef = useRef(onImpact);
+  const onCompleteRef = useRef(onComplete);
+  onImpactRef.current = onImpact;
+  onCompleteRef.current = onComplete;
   phaseRef.current = frame.phase;
 
   useEffect(() => {
@@ -118,7 +123,7 @@ export const BoostParticle: React.FC<BoostParticleProps> = ({
         if (t >= 1) {
           if (!impactFiredRef.current) {
             impactFiredRef.current = true;
-            onImpact?.(data);
+            onImpactRef.current?.(data);
           }
           phaseRef.current = 'trailOnly';
           trailOnlyStartRef.current = now;
@@ -134,7 +139,10 @@ export const BoostParticle: React.FC<BoostParticleProps> = ({
         const trailElapsed = now - trailOnlyStartRef.current;
         const fade = Math.max(0, 1 - trailElapsed / TRAIL_FADE_AFTER_HIT_MS);
         if (fade <= 0) {
-          onComplete();
+          if (!completeScheduledRef.current) {
+            completeScheduledRef.current = true;
+            onCompleteRef.current();
+          }
           return;
         }
         setFrame((prev) => ({ ...prev, trailOpacity: fade, trail: [...trailRef.current] }));
@@ -147,7 +155,24 @@ export const BoostParticle: React.FC<BoostParticleProps> = ({
 
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [data, containerRef, boostAreaRef, onImpact, onComplete]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, containerRef, boostAreaRef]);
+
+  // Safety net: force-complete if animation is stuck
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (!impactFiredRef.current) {
+        impactFiredRef.current = true;
+        onImpactRef.current?.(data);
+      }
+      if (!completeScheduledRef.current) {
+        completeScheduledRef.current = true;
+        if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; }
+        onCompleteRef.current();
+      }
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [data.id]);
 
   const { phase, pos, trail, trailOpacity } = frame;
 

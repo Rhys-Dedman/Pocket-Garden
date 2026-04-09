@@ -113,6 +113,10 @@ export const GoalCoinParticle: React.FC<GoalCoinParticleProps> = ({
   const rafRef = useRef<number>(0);
   const mountedRef = useRef(true);
   const completeScheduledRef = useRef(false);
+  const onImpactRef = useRef(onImpact);
+  const onCompleteRef = useRef(onComplete);
+  onImpactRef.current = onImpact;
+  onCompleteRef.current = onComplete;
   phaseRef.current = frame.phase;
 
   useEffect(() => {
@@ -146,7 +150,7 @@ export const GoalCoinParticle: React.FC<GoalCoinParticleProps> = ({
         rafRef.current = 0;
       }
       trailRef.current = [];
-      onComplete();
+      onCompleteRef.current();
     };
 
     const tick = () => {
@@ -194,7 +198,7 @@ export const GoalCoinParticle: React.FC<GoalCoinParticleProps> = ({
         if (t >= 1) {
           if (!impactFiredRef.current) {
             impactFiredRef.current = true;
-            onImpact(data.value);
+            onImpactRef.current(data.value);
           }
           if (useTrail) {
             trailOnlyStartRef.current = now;
@@ -241,7 +245,24 @@ export const GoalCoinParticle: React.FC<GoalCoinParticleProps> = ({
       rafRef.current = 0;
       trailRef.current = [];
     };
-  }, [data, containerRef, walletRef, walletIconRef, appScale, onImpact, onComplete, useTrail, isPopupReward, trailFadeAfterHitMs, moveDurationMs]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, containerRef, walletRef, walletIconRef, appScale, useTrail, isPopupReward, trailFadeAfterHitMs, moveDurationMs]);
+
+  // Safety net: force-complete if animation is stuck (RAF starvation during heavy renders)
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (!impactFiredRef.current) {
+        impactFiredRef.current = true;
+        onImpactRef.current(data.value);
+      }
+      if (!completeScheduledRef.current) {
+        completeScheduledRef.current = true;
+        if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; }
+        onCompleteRef.current();
+      }
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [data.id, data.value]);
 
   const { phase, pos, scale, trail, trailOpacity } = frame;
 

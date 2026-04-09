@@ -1103,6 +1103,14 @@ export default function App() {
   const [harvestCharges, setHarvestCharges] = useState(HARVEST_CHARGES_MAX);
   const harvestChargesRef = useRef(HARVEST_CHARGES_MAX);
   harvestChargesRef.current = harvestCharges;
+  /** Ephemeral label above seed/harvest SideAction when an action is blocked (white text, no panel) */
+  const [sideButtonToast, setSideButtonToast] = useState<{
+    anchor: 'seed' | 'harvest';
+    message: string;
+    id: number;
+  } | null>(null);
+  const sideButtonToastTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const sideButtonToastIdRef = useRef(0);
   const [seedsState, setSeedsState] = useState(createInitialSeedsState);
   const [harvestState, setHarvestState] = useState<HarvestState>(createInitialHarvestState);
   const [cropsState, setCropsState] = useState<Record<string, UpgradeState>>(createInitialCropsState);
@@ -1939,6 +1947,7 @@ export default function App() {
       if (ftue11Delay2Ref.current) clearTimeout(ftue11Delay2Ref.current);
       if (ftue10BigBounceTimeoutRef.current) clearTimeout(ftue10BigBounceTimeoutRef.current);
       if (ftue95EnterTimeoutRef.current) clearTimeout(ftue95EnterTimeoutRef.current);
+      if (sideButtonToastTimeoutRef.current) clearTimeout(sideButtonToastTimeoutRef.current);
     };
   }, []);
 
@@ -1967,6 +1976,7 @@ export default function App() {
     harvestChargesRef.current = HARVEST_CHARGES_MAX;
 
     // Swap buttons to normal + leaf burst + big bounce.
+    playSfx(SFX_IDS.uiUnlockUpgrade);
     setFtue10ButtonsNormalEarly(true);
     triggerSeedButtonLeafBurst();
     triggerHarvestButtonLeafBurst();
@@ -3801,6 +3811,33 @@ export default function App() {
     }, 200);
   }, [grid]);
 
+  const showSideButtonToast = (anchor: 'seed' | 'harvest', message: string) => {
+    if (sideButtonToastTimeoutRef.current != null) {
+      clearTimeout(sideButtonToastTimeoutRef.current);
+      sideButtonToastTimeoutRef.current = null;
+    }
+    const id = ++sideButtonToastIdRef.current;
+    setSideButtonToast({ anchor, message, id });
+    // Match .side-action-toast-text duration in index.html (1.15s) + small buffer
+    sideButtonToastTimeoutRef.current = window.setTimeout(() => {
+      setSideButtonToast(null);
+      sideButtonToastTimeoutRef.current = null;
+    }, 1250);
+  };
+
+  /** True if harvest can route crops to goals (or surplus sales is active). */
+  const computeCanSpendHarvestCharge = (): boolean => {
+    if (isSurplusSalesUnlocked(harvestState, playerLevel)) return true;
+    for (let i = 0; i < goalSlots.length; i++) {
+      if (goalSlots[i] !== 'green' || (goalCounts[i] ?? 0) <= 0) continue;
+      const inFlight = goalInFlightHarvestBySlotRef.current[i] ?? 0;
+      if ((goalCounts[i] ?? 0) - inFlight <= 0) continue;
+      const pt = goalPlantTypes[i] ?? 0;
+      if (grid.some((cell) => cell.item && cell.item.level === pt)) return true;
+    }
+    return false;
+  };
+
   const handlePlantClick = (e: React.MouseEvent) => {
     e.stopPropagation();
 
@@ -3907,6 +3944,7 @@ export default function App() {
       } else {
         // Has charges but nowhere valid to spawn (board/reservations full) → same feedback as no charges.
         playSfx(SFX_IDS.gameplayNoCharges);
+        showSideButtonToast('seed', 'No space\nin garden');
       }
       return;
     }
@@ -3992,20 +4030,7 @@ export default function App() {
         playSfx(SFX_IDS.gameplayNoCharges);
         return;
       }
-      let canSpendCharge = isSurplusSalesUnlocked(harvestState, playerLevel);
-      if (!canSpendCharge) {
-        for (let i = 0; i < goalSlots.length; i++) {
-          if (goalSlots[i] !== 'green' || (goalCounts[i] ?? 0) <= 0) continue;
-          const inFlight = goalInFlightHarvestBySlotRef.current[i] ?? 0;
-          if ((goalCounts[i] ?? 0) - inFlight <= 0) continue;
-          const pt = goalPlantTypes[i] ?? 0;
-          if (grid.some((cell) => cell.item && cell.item.level === pt)) {
-            canSpendCharge = true;
-            break;
-          }
-        }
-      }
-      if (!canSpendCharge) {
+      if (!computeCanSpendHarvestCharge()) {
         playSfx(SFX_IDS.gameplayNoCharges);
         return;
       }
@@ -4021,23 +4046,12 @@ export default function App() {
       const hasPlant = grid.some((c) => c.item);
       if (!hasPlant) {
         playSfx(SFX_IDS.gameplayNoCharges);
+        showSideButtonToast('harvest', "Plants don't\nmatch orders");
         return;
       }
-      let canSpendCharge = isSurplusSalesUnlocked(harvestState, playerLevel);
-      if (!canSpendCharge) {
-        for (let i = 0; i < goalSlots.length; i++) {
-          if (goalSlots[i] !== 'green' || (goalCounts[i] ?? 0) <= 0) continue;
-          const inFlight = goalInFlightHarvestBySlotRef.current[i] ?? 0;
-          if ((goalCounts[i] ?? 0) - inFlight <= 0) continue;
-          const pt = goalPlantTypes[i] ?? 0;
-          if (grid.some((cell) => cell.item && cell.item.level === pt)) {
-            canSpendCharge = true;
-            break;
-          }
-        }
-      }
-      if (!canSpendCharge) {
+      if (!computeCanSpendHarvestCharge()) {
         playSfx(SFX_IDS.gameplayNoCharges);
+        showSideButtonToast('harvest', "Plants don't\nmatch orders");
         return;
       }
       playSfx(SFX_IDS.gameplayHarvest);
@@ -5869,7 +5883,7 @@ export default function App() {
                   }}
                 >
                    <div
-                     className="pointer-events-auto flex items-center justify-center"
+                     className="pointer-events-auto relative flex items-center justify-center"
                      ref={plantButtonRef}
                      style={{
                        transformOrigin: 'center center',
@@ -5883,6 +5897,22 @@ export default function App() {
                      }}
                      onClick={(e) => e.stopPropagation()}
                    >
+                    {sideButtonToast?.anchor === 'seed' && (
+                      <div
+                        className="absolute bottom-full left-1/2 z-[60] mb-1 min-w-[200px] max-w-[min(360px,calc(100vw-40px))] -translate-x-1/2 pointer-events-none px-2 text-center"
+                        role="status"
+                        aria-live="polite"
+                        aria-atomic="true"
+                      >
+                        <span
+                          key={sideButtonToast.id}
+                          className="side-action-toast-text text-[11px] font-extrabold leading-snug tracking-tight"
+                          style={{ fontFamily: 'Inter, sans-serif' }}
+                        >
+                          {sideButtonToast.message}
+                        </span>
+                      </div>
+                    )}
 <SideAction
                         label="Plant"
                         icon={assetPath(`/assets/plants/plant_${seedLevel}.png`)}
@@ -5904,7 +5934,7 @@ export default function App() {
                       />
                    </div>
                    <div
-                     className="pointer-events-auto flex items-center justify-center"
+                     className="pointer-events-auto relative flex items-center justify-center"
                      ref={harvestButtonRef}
                      style={{
                        transformOrigin: 'center center',
@@ -5917,6 +5947,22 @@ export default function App() {
                      }}
                      onClick={(e) => e.stopPropagation()}
                    >
+                    {sideButtonToast?.anchor === 'harvest' && (
+                      <div
+                        className="absolute bottom-full left-1/2 z-[60] mb-1 min-w-[200px] max-w-[min(360px,calc(100vw-40px))] -translate-x-1/2 pointer-events-none px-2 text-center"
+                        role="status"
+                        aria-live="polite"
+                        aria-atomic="true"
+                      >
+                        <span
+                          key={sideButtonToast.id}
+                          className="side-action-toast-text text-[11px] font-extrabold leading-snug tracking-tight"
+                          style={{ fontFamily: 'Inter, sans-serif' }}
+                        >
+                          {sideButtonToast.message}
+                        </span>
+                      </div>
+                    )}
                      <SideAction 
                         label="Harvest" 
                         icon={assetPath('/assets/icons/icon_harvest.png')} 
@@ -6200,6 +6246,11 @@ export default function App() {
                     ftue10GreenFlashUpgradeId={ftue10GreenFlashUpgradeId}
                     ftue10PurchaseButtonRef={ftue10PurchaseButtonRef}
                     ftue10LockScroll={activeFtueStage === 'first_upgrade' && ftue10Phase === 'finger'}
+                    ftue10DisableSeedProductionPurchase={
+                      activeFtueStage === 'first_upgrade' &&
+                      ftue10Phase === 'panel_open_orders' &&
+                      activeTab === 'SEEDS'
+                    }
                     goldenPotCount={goldenPotCount}
                     onUpgradePurchase={(upgradeId) => {
                       playSfx(SFX_IDS.uiConfirmReward);
