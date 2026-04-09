@@ -121,15 +121,19 @@ function tryPlayMusic(): void {
   }
 }
 
-export function preloadSfxAssets(): Promise<void> {
+const sfxIds = Object.values(SFX_IDS) as SfxId[];
+/** Number of individual SFX load steps (load + decode per ID). */
+export const SFX_PRELOAD_STEP_COUNT = sfxIds.length * 2;
+
+export function preloadSfxAssets(onStepDone?: () => void): Promise<void> {
   if (preloadPromise) return preloadPromise;
   attachAudioUnlockHandlers();
   preloadPromise = Promise.all(
-    (Object.values(SFX_IDS) as SfxId[]).map((id) => {
+    sfxIds.map((id) => {
       return new Promise<void>((resolve) => {
         const audio = createTemplate(id);
         audioTemplateById.set(id, audio);
-        const done = () => resolve();
+        const done = () => { onStepDone?.(); resolve(); };
         audio.addEventListener('canplaythrough', done, { once: true });
         audio.addEventListener('error', done, { once: true });
         audio.load();
@@ -137,20 +141,23 @@ export function preloadSfxAssets(): Promise<void> {
     })
   )
     .then(async () => {
-      // Decode all SFX up-front for low-latency playback.
       const ctx = getAudioContext();
-      if (!ctx) return;
+      if (!ctx) {
+        sfxIds.forEach(() => onStepDone?.());
+        return;
+      }
       await Promise.all(
-        (Object.values(SFX_IDS) as SfxId[]).map(async (id) => {
+        sfxIds.map(async (id) => {
           try {
             const resp = await fetch(assetPath(SFX_PATHS[id]));
-            if (!resp.ok) return;
+            if (!resp.ok) { onStepDone?.(); return; }
             const arr = await resp.arrayBuffer();
             const buf = await ctx.decodeAudioData(arr.slice(0));
             audioBufferById.set(id, buf);
           } catch {
             // Keep HTMLAudio fallback if decode/fetch fails.
           }
+          onStepDone?.();
         })
       );
     })

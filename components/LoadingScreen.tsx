@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { assetPath } from '../utils/assetPath';
-import { preloadSfxAssets } from '../utils/sfx';
+import { preloadSfxAssets, SFX_PRELOAD_STEP_COUNT } from '../utils/sfx';
 
 interface LoadingScreenProps {
   onLoadComplete: () => void;
@@ -139,29 +139,26 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   }, []);
 
   const preloadAssets = useCallback(async () => {
-    const total = ASSETS_TO_PRELOAD.length;
+    const total = ASSETS_TO_PRELOAD.length + SFX_PRELOAD_STEP_COUNT;
     let loaded = 0;
+
+    const bump = () => {
+      loaded++;
+      setProgress(Math.min(99, Math.round((loaded / total) * 100)));
+    };
 
     const loadImage = (src: string): Promise<void> => {
       return new Promise((resolve) => {
         const img = new Image();
-        img.onload = () => {
-          loaded++;
-          setProgress(Math.min(99, Math.round((loaded / total) * 100)));
-          resolve();
-        };
-        img.onerror = () => {
-          loaded++;
-          setProgress(Math.min(99, Math.round((loaded / total) * 100)));
-          resolve();
-        };
+        img.onload = () => { bump(); resolve(); };
+        img.onerror = () => { bump(); resolve(); };
         img.src = assetPath(src);
       });
     };
 
     await Promise.all([
       Promise.all(ASSETS_TO_PRELOAD.map(loadImage)),
-      preloadSfxAssets(),
+      preloadSfxAssets(bump),
     ]);
     if (variant === 'quick') {
       setPhase('quickFade');
