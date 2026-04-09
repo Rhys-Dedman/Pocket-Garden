@@ -100,12 +100,46 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   variant = 'splash',
   onQuickResumeHydrate,
 }) => {
-  const [progress, setProgress] = useState(0);
+  const [displayProgress, setDisplayProgress] = useState(0);
   const [phase, setPhase] = useState<'boot' | 'fadeIn' | 'loading' | 'ready' | 'fadeOut' | 'quickFade' | 'done'>(() =>
     variant === 'quick' ? 'loading' : 'boot'
   );
   const [blackOpacity, setBlackOpacity] = useState(1);
   const [viewportSize, setViewportSize] = useState({ width: window.innerWidth, height: window.innerHeight });
+
+  const targetProgressRef = useRef(0);
+  const displayProgressRef = useRef(0);
+  const progressRafRef = useRef(0);
+  const allDoneRef = useRef(false);
+
+  // Smooth progress RAF: displayed value chases targetProgressRef
+  useEffect(() => {
+    if (variant === 'quick') return;
+    let lastTime = performance.now();
+    const tick = (now: number) => {
+      const dt = (now - lastTime) / 1000;
+      lastTime = now;
+      const target = targetProgressRef.current;
+      const cur = displayProgressRef.current;
+
+      if (allDoneRef.current) {
+        displayProgressRef.current = 99;
+        setDisplayProgress(99);
+        return;
+      }
+
+      if (cur < target) {
+        const gap = target - cur;
+        const speed = Math.max(8, gap * 3);
+        const next = Math.min(target, cur + speed * dt);
+        displayProgressRef.current = next;
+        setDisplayProgress(Math.round(next));
+      }
+      progressRafRef.current = requestAnimationFrame(tick);
+    };
+    progressRafRef.current = requestAnimationFrame(tick);
+    return () => { if (progressRafRef.current) cancelAnimationFrame(progressRafRef.current); };
+  }, [variant]);
 
   // Calculate scale to fit 9:16 container in viewport
   const appScale = useMemo(() => {
@@ -144,7 +178,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
 
     const bump = () => {
       loaded++;
-      setProgress(Math.min(99, Math.round((loaded / total) * 100)));
+      targetProgressRef.current = Math.min(99, (loaded / total) * 100);
     };
 
     const loadImage = (src: string): Promise<void> => {
@@ -163,7 +197,9 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
     if (variant === 'quick') {
       setPhase('quickFade');
     } else {
-      setProgress(100);
+      allDoneRef.current = true;
+      if (progressRafRef.current) { cancelAnimationFrame(progressRafRef.current); progressRafRef.current = 0; }
+      setDisplayProgress(99);
       setPhase('ready');
     }
   }, [variant]);
@@ -324,11 +360,12 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
           >
             {/* Progress bar fill with inner stroke */}
             <div 
-              className="h-full transition-all duration-150 ease-out rounded-full"
+              className="h-full rounded-full"
               style={{ 
-                width: `${progress}%`,
+                width: `${phase === 'ready' ? 100 : displayProgress}%`,
                 background: 'linear-gradient(to bottom, #fcea3f, #f7911d)',
                 boxShadow: 'inset 0 0 0 3px rgba(239, 71, 35, 0.5)',
+                transition: phase === 'ready' ? 'width 200ms ease-out' : 'none',
               }}
             />
             {/* Text centered inside progress bar */}
@@ -338,7 +375,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
                   className="text-white text-sm font-bold tracking-wide"
                   style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}
                 >
-                  LOADING {progress}%
+                  LOADING {displayProgress}%
                 </p>
               )}
               {phase === 'ready' && (
