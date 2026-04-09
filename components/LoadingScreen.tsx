@@ -147,12 +147,12 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
         const img = new Image();
         img.onload = () => {
           loaded++;
-          setProgress(Math.round((loaded / total) * 100));
+          setProgress(Math.min(99, Math.round((loaded / total) * 100)));
           resolve();
         };
         img.onerror = () => {
           loaded++;
-          setProgress(Math.round((loaded / total) * 100));
+          setProgress(Math.min(99, Math.round((loaded / total) * 100)));
           resolve();
         };
         img.src = assetPath(src);
@@ -166,6 +166,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
     if (variant === 'quick') {
       setPhase('quickFade');
     } else {
+      setProgress(100);
       setPhase('ready');
     }
   }, [variant]);
